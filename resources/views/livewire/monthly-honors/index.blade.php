@@ -46,6 +46,13 @@
                     Rp{{ number_format($totalGrand, 0, ',', '.') }}
                 </h3>
             </div>
+
+            <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                <p class="text-sm text-slate-500">Potongan Alpa</p>
+                <h3 class="text-2xl font-black text-red-600">
+                    Rp{{ number_format($totalDeduction ?? 0, 0, ',', '.') }}
+                </h3>
+            </div>
         </section>
 
         <section class="grid lg:grid-cols-4 gap-4">
@@ -103,6 +110,15 @@
                             <td class="p-5 font-extrabold text-blue-700">
                                 Rp{{ number_format($honor->grand_total, 0, ',', '.') }}
                             </td>
+                            <div class="rounded-2xl bg-red-50 p-4">
+                                <p class="text-xs text-red-500">Potongan Alpa</p>
+                                <p class="font-black text-red-700">
+                                    Rp{{ number_format($honor->total_deduction ?? 0, 0, ',', '.') }}
+                                </p>
+                                <p class="text-xs text-red-400">
+                                    {{ $honor->total_absent_hours ?? 0 }} JP tidak hadir
+                                </p>
+                            </div>
                             <td class="p-5">
                                 @if ($honor->payment_status === 'paid')
                                     <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">

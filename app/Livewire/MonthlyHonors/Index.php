@@ -3,10 +3,8 @@
 namespace App\Livewire\MonthlyHonors;
 
 use App\Exports\MonthlyHonorsExport;
-use App\Models\DailyAttendance;
 use App\Models\MonthlyHonor;
-use App\Models\SubjectAttendance;
-use App\Models\Teacher;
+use Illuminate\Support\Facades\Artisan;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Maatwebsite\Excel\Facades\Excel;
@@ -42,37 +40,12 @@ class Index extends Component
 
     public function generate(): void
     {
-        $teachers = Teacher::where('is_active', true)->get();
+        Artisan::call('honor:generate-monthly', [
+            'month' => $this->month,
+            'year' => $this->year,
+        ]);
 
-        foreach ($teachers as $teacher) {
-            $subjectQuery = SubjectAttendance::where('teacher_id', $teacher->id)
-                ->whereMonth('teaching_date', $this->month)
-                ->whereYear('teaching_date', $this->year);
-
-            $transportQuery = DailyAttendance::where('teacher_id', $teacher->id)
-                ->whereMonth('attendance_date', $this->month)
-                ->whereYear('attendance_date', $this->year);
-
-            $totalTeachingHours = (int) $subjectQuery->sum('hours_count');
-            $totalTeachingHonor = (int) $subjectQuery->sum('teaching_honor');
-            $totalTransport = (int) $transportQuery->sum('transport_amount');
-            $grandTotal = $totalTeachingHonor + $totalTransport;
-
-            MonthlyHonor::updateOrCreate(
-                [
-                    'teacher_id' => $teacher->id,
-                    'month' => $this->month,
-                    'year' => $this->year,
-                ],
-                [
-                    'total_teaching_hours' => $totalTeachingHours,
-                    'total_teaching_honor' => $totalTeachingHonor,
-                    'total_transport' => $totalTransport,
-                    'grand_total' => $grandTotal,
-                    'payment_status' => 'unpaid',
-                ]
-            );
-        }
+        session()->flash('success', 'Rekap honor berhasil digenerate.');
     }
 
     public function markAsPaid(int $id): void
@@ -109,25 +82,37 @@ class Index extends Component
             ->latest()
             ->paginate(10);
 
+
         return view('livewire.monthly-honors.index', [
             'honors' => $honors,
+
             'totalGrand' => MonthlyHonor::where('month', $this->month)
                 ->where('year', $this->year)
                 ->sum('grand_total'),
+
             'totalTransport' => MonthlyHonor::where('month', $this->month)
                 ->where('year', $this->year)
                 ->sum('total_transport'),
+
             'totalTeachingHonor' => MonthlyHonor::where('month', $this->month)
                 ->where('year', $this->year)
                 ->sum('total_teaching_honor'),
+
+             'totalDeduction' => MonthlyHonor::where('month', $this->month)
+            ->where('year', $this->year)
+            ->sum('total_deduction'),
+
+            'totalAdditionalHonor' => MonthlyHonor::where('month', $this->month)
+                ->where('year', $this->year)
+                ->sum('total_additional_honor'),
         ])->layout('layouts.app');
     }
 
     public function exportExcel()
-{
-    return Excel::download(
-        new MonthlyHonorsExport($this->month, $this->year),
-        'rekap-honor-' . $this->month . '-' . $this->year . '.xlsx'
-    );
-}
+    {
+        return Excel::download(
+            new MonthlyHonorsExport($this->month, $this->year),
+            'rekap-honor-' . $this->month . '-' . $this->year . '.xlsx'
+        );
+    }
 }

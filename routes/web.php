@@ -6,7 +6,7 @@ use App\Http\Controllers\HonorPdfController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SubjectAttendancePdfController;
 use App\Http\Controllers\TeacherHonorPdfController;
-
+use App\Livewire\TeacherHonorPackages\Index as TeacherHonorPackagesIndex;
 use App\Livewire\AdditionalHonors\Index as AdditionalHonorsIndex;
 use App\Livewire\DailyAttendances\Index as DailyAttendancesIndex;
 use App\Livewire\Dashboard\Index as DashboardIndex;
@@ -71,6 +71,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/daily-attendances/pdf/{date}', [DailyAttendancePdfController::class, 'show'])->name('daily-attendances.pdf');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+    Route::get('/teacher-honor-packages', TeacherHonorPackagesIndex::class)
+    ->name('teacher-honor-packages.index');
 });
 
 require __DIR__.'/auth.php';

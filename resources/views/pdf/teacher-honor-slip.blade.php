@@ -60,11 +60,40 @@
                 </tr>
                 <tr>
                     <td>Transport</td>
-                    <td class="right">Rp{{ number_format($honor->total_transport, 0, ',', '.') }}</td>
+                    <td class="right">
+                        Rp{{ number_format($honor->total_transport ?? 0, 0, ',', '.') }}
+                    </td>
                 </tr>
+
+                <tr>
+                    <td>Total Tambahan Honor</td>
+                    <td class="right">
+                        Rp{{ number_format($honor->total_additional_honor ?? 0, 0, ',', '.') }}
+                    </td>
+                </tr>
+
+                @if(isset($additionalHonors) && $additionalHonors->count())
+                    @foreach($additionalHonors as $additional)
+                        <tr>
+                            <td style="padding-left: 24px;">
+                                • {{ $additional->title }}
+                                @if($additional->note)
+                                    <br>
+                                    <small style="color:#64748b;">{{ $additional->note }}</small>
+                                @endif
+                            </td>
+                            <td class="right">
+                                Rp{{ number_format($additional->amount, 0, ',', '.') }}
+                            </td>
+                        </tr>
+                    @endforeach
+                @endif
+
                 <tr>
                     <td class="total">Grand Total</td>
-                    <td class="right total">Rp{{ number_format($honor->grand_total, 0, ',', '.') }}</td>
+                    <td class="right total">
+                        Rp{{ number_format($honor->grand_total ?? 0, 0, ',', '.') }}
+                    </td>
                 </tr>
             </tbody>
         </table>

@@ -7,7 +7,6 @@ use App\Models\DailyAttendance;
 use App\Models\MonthlyHonor;
 use App\Models\SubjectAttendance;
 use App\Models\Teacher;
-use Carbon\Carbon;
 use Illuminate\Console\Command;
 
 class GenerateMonthlyHonor extends Command
@@ -20,12 +19,20 @@ class GenerateMonthlyHonor extends Command
     {
         $targetDate = now()->subMonth();
 
-        $month = $this->argument('month') ?: $targetDate->month;
-        $year = $this->argument('year') ?: $targetDate->year;
+        $month = (int) ($this->argument('month') ?: $targetDate->month);
+        $year = (int) ($this->argument('year') ?: $targetDate->year);
 
-        $teachers = Teacher::where('is_active', true)->get();
+        $teachers = Teacher::with('honorPackage')
+            ->where('is_active', true)
+            ->get();
 
         foreach ($teachers as $teacher) {
+            $package = $teacher->honorPackage;
+
+            if (! $package || ! $package->is_active) {
+                continue;
+            }
+
             $subjectQuery = SubjectAttendance::where('teacher_id', $teacher->id)
                 ->whereMonth('teaching_date', $month)
                 ->whereYear('teaching_date', $year);
@@ -35,7 +42,9 @@ class GenerateMonthlyHonor extends Command
                 ->whereYear('attendance_date', $year);
 
             $totalTeachingHours = (int) $subjectQuery->sum('hours_count');
-            $totalTeachingHonor = (int) $subjectQuery->sum('teaching_honor');
+
+            $baseTeachingHonor = (int) $package->monthly_honor;
+
             $totalTransport = (int) $transportQuery->sum('transport_amount');
 
             $totalAdditionalHonor = (int) AdditionalHonor::where('teacher_id', $teacher->id)
@@ -43,8 +52,18 @@ class GenerateMonthlyHonor extends Command
                 ->where('year', $year)
                 ->sum('amount');
 
-            $grandTotal = $totalTeachingHonor + $totalTransport + $totalAdditionalHonor;
+            $totalAbsentHours = (int) SubjectAttendance::where('teacher_id', $teacher->id)
+                ->whereMonth('teaching_date', $month)
+                ->whereYear('teaching_date', $year)
+                ->where('attendance_status', 'absent')
+                ->sum('hours_count');
 
+            $totalDeduction = (int) ($totalAbsentHours * $package->deduction_per_hour);
+
+            $grandTotal = $baseTeachingHonor
+                + $totalTransport
+                + $totalAdditionalHonor
+                - $totalDeduction;
 
             MonthlyHonor::updateOrCreate(
                 [
@@ -54,11 +73,13 @@ class GenerateMonthlyHonor extends Command
                 ],
                 [
                     'total_teaching_hours' => $totalTeachingHours,
-                    'total_teaching_honor' => $totalTeachingHonor,
+                    'total_teaching_honor' => $baseTeachingHonor,
                     'total_transport' => $totalTransport,
-                    'grand_total' => $grandTotal,
-                    'payment_status' => 'unpaid',
                     'total_additional_honor' => $totalAdditionalHonor,
+                    'total_absent_hours' => $totalAbsentHours,
+                    'total_deduction' => $totalDeduction,
+                    'grand_total' => max($grandTotal, 0),
+                    'payment_status' => 'unpaid',
                 ]
             );
         }

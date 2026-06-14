@@ -20,6 +20,7 @@ class Create extends Component
 
     public ?Teacher $teacher = null;
     public bool $isAllowed = false;
+    public string $dayName = '';
 
     public array $classes = [
         'Kelas 10',
@@ -32,20 +33,30 @@ class Create extends Component
     public function mount(): void
     {
         $this->teacher = auth()->user()->teacher ?? null;
+        $this->dayName = $this->currentDayName();
 
         if (! $this->teacher || ! $this->teacher->is_picket_officer) {
             $this->isAllowed = false;
             return;
         }
 
-        $todayName = now()->locale('id')->translatedFormat('l');
-
         $this->isAllowed = TeacherPicketSchedule::where('teacher_id', $this->teacher->id)
-            ->where('day', $todayName)
+            ->where('day', $this->dayName)
             ->where('is_active', true)
-            ->whereTime('start_time', '<=', now()->format('H:i:s'))
-            ->whereTime('end_time', '>=', now()->format('H:i:s'))
             ->exists();
+    }
+
+    private function currentDayName(): string
+    {
+        return [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Ahad',
+        ][now()->format('l')];
     }
 
     public function addStudent(): void
@@ -141,42 +152,42 @@ class Create extends Component
         session()->flash('success', 'Laporan piket berhasil disimpan.');
     }
 
+    public function sendWhatsappGroup(): void
+    {
+        if (! $this->isAllowed) {
+            abort(403);
+        }
+
+        $message = $this->buildMessage();
+
+        $response = WhatsappService::send(
+            env('WA_GROUP_TARGET'),
+            $message
+        );
+
+        if ($response->successful()) {
+            PicketReport::updateOrCreate(
+                [
+                    'teacher_id' => $this->teacher->id,
+                    'report_date' => now()->toDateString(),
+                ],
+                [
+                    'teacher_absences' => $this->teacher_absences,
+                    'whatsapp_message' => $message,
+                    'sent_at' => now(),
+                ]
+            );
+
+            session()->flash('success', 'Laporan berhasil dikirim ke WhatsApp.');
+        } else {
+            session()->flash('error', 'Gagal kirim WhatsApp. Cek token atau target WA.');
+        }
+    }
+
     public function render()
     {
         return view('livewire.picket-reports.create', [
             'previewMessage' => $this->buildMessage(),
         ])->layout('layouts.app');
     }
-
-    public function sendWhatsappGroup(): void
-{
-    if (! $this->isAllowed) {
-        abort(403);
-    }
-
-    $message = $this->buildMessage();
-
-    $response = WhatsappService::send(
-        env('WA_GROUP_TARGET'),
-        $message
-    );
-
-    if ($response->successful()) {
-        PicketReport::updateOrCreate(
-            [
-                'teacher_id' => $this->teacher->id,
-                'report_date' => now()->toDateString(),
-            ],
-            [
-                'teacher_absences' => $this->teacher_absences,
-                'whatsapp_message' => $message,
-                'sent_at' => now(),
-            ]
-        );
-
-        session()->flash('success', 'Laporan berhasil dikirim ke WhatsApp.');
-    } else {
-        session()->flash('error', 'Gagal kirim WhatsApp. Cek token atau target WA.');
-    }
-}
 }

@@ -7,20 +7,22 @@ use Illuminate\Database\Eloquent\Model;
 class MonthlyHonor extends Model
 {
     protected $fillable = [
-    'teacher_id',
-    'month',
-    'year',
-    'total_teaching_hours',
-    'total_teaching_honor',
-    'total_transport',
-    'grand_total',
-    'payment_status',
-    'paid_at',
-    'total_additional_honor',
-];
+        'teacher_id',
+        'month',
+        'year',
+        'total_teaching_hours',
+        'total_teaching_honor',
+        'total_transport',
+        'total_additional_honor',
+        'total_absent_hours',
+        'total_deduction',
+        'grand_total',
+        'payment_status',
+        'paid_at',
+    ];
 
-public function teacher()
-{
-    return $this->belongsTo(Teacher::class);
-}
+    public function teacher()
+    {
+        return $this->belongsTo(Teacher::class);
+    }
 }

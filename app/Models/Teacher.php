@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\TeacherHonorPackage;
 use App\Models\TeacherPicketSchedule;
 use Illuminate\Database\Eloquent\Model;
 
@@ -31,6 +32,11 @@ public function picketSchedules()
 public function user()
 {
     return $this->hasOne(User::class);
+}
+
+public function honorPackage()
+{
+    return $this->hasOne(TeacherHonorPackage::class);
 }
 
 

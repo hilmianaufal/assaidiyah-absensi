@@ -54,6 +54,12 @@
                         Data Guru
                     </a>
 
+                    <a href="{{ route('teacher-honor-packages.index') }}"
+                        class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher-honor-packages.index') ? 'bg-white/15' : '' }}">
+                        <i data-lucide="badge-dollar-sign" class="w-5 h-5"></i>
+                        Paket Honor
+                    </a>
+
                     <a href="{{ route('subjects.index') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('subjects.index') ? 'bg-white/15' : '' }}">
                         <i data-lucide="book-open" class="w-5 h-5"></i>
                         Mata Pelajaran
@@ -292,5 +298,25 @@
             lucide.createIcons();
         }
     </script>
+    <script>
+    function refreshIcons() {
+        if (window.lucide) {
+            lucide.createIcons();
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', refreshIcons);
+
+    document.addEventListener('livewire:navigated', refreshIcons);
+
+    document.addEventListener('livewire:initialized', () => {
+        Livewire.hook('morph.updated', () => {
+            refreshIcons();
+        });
+    });
+
+    setTimeout(refreshIcons, 300);
+    setTimeout(refreshIcons, 1000);
+</script>
 </body>
 </html>

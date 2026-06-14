@@ -135,27 +135,44 @@
                             </div>
                         </div>
 
-                        <pre class="whitespace-pre-wrap text-sm leading-7 text-slate-100 font-sans bg-white/5 rounded-2xl p-4 max-h-[520px] overflow-y-auto">{{ $previewMessage }}</pre>
+                       <pre id="picketMessagePreview"
+                        class="whitespace-pre-wrap text-sm leading-7 text-slate-100 font-sans bg-white/5 rounded-2xl p-4 max-h-[520px] overflow-y-auto">{{ $previewMessage }}</pre>
 
                         <button wire:click="save" type="button"
                             class="mt-5 w-full px-5 py-3 rounded-2xl bg-emerald-500 text-white font-black shadow">
                             Simpan Laporan
                         </button>
 
-                        <button wire:click="sendWhatsappGroup" type="button"
+                        <button type="button"
+                            onclick="openWhatsappWithMessage()"
                             class="mt-3 w-full px-5 py-3 rounded-2xl bg-emerald-500 text-white font-black">
-                            Kirim WhatsApp Group
+                            Kirim ke WhatsApp
                         </button>
 
-                        <p class="mt-3 text-xs text-slate-400 text-center">
-                            Tombol WhatsApp akan kita aktifkan setelah service WA dibuat.
-                        </p>
+
                     </div>
                 </div>
             </section>
         @endif
     </div>
+<script>
+    function openWhatsappWithMessage() {
+        const message = document.getElementById('picketMessagePreview').innerText;
+        const encodedMessage = encodeURIComponent(message);
 
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        const url = isMobile
+            ? `whatsapp://send?text=${encodedMessage}`
+            : `https://web.whatsapp.com/send?text=${encodedMessage}`;
+
+        window.open(url, '_blank');
+    }
+
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+</script>
     <script>
         if (window.lucide) {
             lucide.createIcons();
