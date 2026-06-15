@@ -37,11 +37,17 @@ class Honors extends Component
             ->whereYear('teaching_date', $this->year)
             ->latest('teaching_date')
             ->get();
-$additionalHonors = AdditionalHonor::where('teacher_id', $teacher->id)
-    ->where('month', $this->month)
-    ->where('year', $this->year)
-    ->latest()
-    ->get();
+            $additionalHonors = AdditionalHonor::where('teacher_id', $teacher->id)
+                ->where('month', $this->month)
+                ->where('year', $this->year)
+                ->latest()
+                ->get();
+
+        $honor = MonthlyHonor::with('payments')
+            ->where('teacher_id', $teacher->id)
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->first();
         return view('livewire.teacher-portal.honors', [
             'teacher' => $teacher,
             'honor' => $honor,

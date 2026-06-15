@@ -88,7 +88,19 @@
                         </tr>
                     @endforeach
                 @endif
+                <tr>
+                    <td>Potongan Alpa</td>
+                    <td class="right">
+                        - Rp{{ number_format($honor->total_deduction ?? 0, 0, ',', '.') }}
+                    </td>
+                </tr>
 
+                <tr>
+                    <td>Total JP Alpa</td>
+                    <td class="right">
+                        {{ $honor->total_absent_hours ?? 0 }} JP
+                    </td>
+                </tr>
                 <tr>
                     <td class="total">Grand Total</td>
                     <td class="right total">

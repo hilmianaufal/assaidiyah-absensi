@@ -2,11 +2,11 @@
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DailyAttendancePdfController;
+use App\Http\Controllers\HonorPaymentReceiptController;
 use App\Http\Controllers\HonorPdfController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SubjectAttendancePdfController;
 use App\Http\Controllers\TeacherHonorPdfController;
-use App\Livewire\TeacherHonorPackages\Index as TeacherHonorPackagesIndex;
 use App\Livewire\AdditionalHonors\Index as AdditionalHonorsIndex;
 use App\Livewire\DailyAttendances\Index as DailyAttendancesIndex;
 use App\Livewire\Dashboard\Index as DashboardIndex;
@@ -19,6 +19,7 @@ use App\Livewire\PicketSchedules\Index as PicketSchedulesIndex;
 use App\Livewire\PicketSubjectAttendances\Index as PicketSubjectAttendancesIndex;
 use App\Livewire\SubjectAttendances\Index as SubjectAttendancesIndex;
 use App\Livewire\Subjects\Index as SubjectsIndex;
+use App\Livewire\TeacherHonorPackages\Index as TeacherHonorPackagesIndex;
 use App\Livewire\TeacherPortal\Attendances as TeacherAttendances;
 use App\Livewire\TeacherPortal\Dashboard as TeacherDashboard;
 use App\Livewire\TeacherPortal\Honors as TeacherHonors;
@@ -26,8 +27,8 @@ use App\Livewire\TeacherPortal\Schedules as TeacherSchedules;
 use App\Livewire\Teachers\Index as TeachersIndex;
 use App\Livewire\TeachingSchedules\Index as TeachingSchedulesIndex;
 use App\Livewire\Users\Index as UsersIndex;
-
 use Illuminate\Support\Facades\Route;
+
 
 Route::get('/', function () {
     return view('auth.login');
@@ -46,7 +47,9 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/face-attendance', FaceAttendanceIndex::class)->name('face-attendance.index');
     Route::get('/face-enrollment', FaceEnrollmentIndex::class)->name('face-enrollment.index');
-    Route::get('/kiosk', KioskIndex::class)->name('kiosk.index');
+    Route::get('/kiosk', KioskIndex::class)
+    ->middleware(['auth', 'can:admin-only'])
+    ->name('kiosk.index');
 
     Route::get('/teaching-schedules', TeachingSchedulesIndex::class)->name('teaching-schedules.index');
     Route::get('/picket-schedules', PicketSchedulesIndex::class)->name('picket-schedules.index');
@@ -73,6 +76,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/teacher-honor-packages', TeacherHonorPackagesIndex::class)
     ->name('teacher-honor-packages.index');
+    Route::get('/honor-payments/{payment}/receipt', [HonorPaymentReceiptController::class, 'show'])
+    ->name('honor-payments.receipt');
 });
 
 require __DIR__.'/auth.php';

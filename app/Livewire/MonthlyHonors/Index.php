@@ -3,6 +3,7 @@
 namespace App\Livewire\MonthlyHonors;
 
 use App\Exports\MonthlyHonorsExport;
+use App\Models\HonorPayment;
 use App\Models\MonthlyHonor;
 use Illuminate\Support\Facades\Artisan;
 use Livewire\Component;
@@ -16,6 +17,15 @@ class Index extends Component
     public string $search = '';
     public int $month;
     public int $year;
+
+    public bool $showPaymentModal = false;
+    public ?int $selectedHonorId = null;
+
+    public string $payment_date = '';
+    public int $payment_amount = 0;
+    public string $payment_method = 'cash';
+    public string $reference_number = '';
+    public string $payment_note = '';
 
     public function mount(): void
     {
@@ -48,30 +58,87 @@ class Index extends Component
         session()->flash('success', 'Rekap honor berhasil digenerate.');
     }
 
-    public function markAsPaid(int $id): void
+    public function openPaymentModal(int $honorId): void
     {
-        $honor = MonthlyHonor::findOrFail($id);
+        $honor = MonthlyHonor::with('payments')->findOrFail($honorId);
+
+        $alreadyPaid = (int) $honor->payments()->sum('amount');
+        $remaining = max((int) $honor->grand_total - $alreadyPaid, 0);
+
+        $this->selectedHonorId = $honor->id;
+        $this->payment_date = now()->toDateString();
+        $this->payment_amount = $remaining > 0 ? $remaining : (int) $honor->grand_total;
+        $this->payment_method = 'cash';
+        $this->reference_number = '';
+        $this->payment_note = '';
+
+        $this->showPaymentModal = true;
+    }
+
+    public function savePayment(): void
+    {
+        $this->validate([
+            'selectedHonorId' => ['required', 'exists:monthly_honors,id'],
+            'payment_date' => ['required', 'date'],
+            'payment_amount' => ['required', 'integer', 'min:1'],
+            'payment_method' => ['required', 'string', 'max:100'],
+            'reference_number' => ['nullable', 'string', 'max:255'],
+            'payment_note' => ['nullable', 'string'],
+        ]);
+
+        HonorPayment::create([
+            'monthly_honor_id' => $this->selectedHonorId,
+            'payment_date' => $this->payment_date,
+            'amount' => $this->payment_amount,
+            'payment_method' => $this->payment_method,
+            'reference_number' => $this->reference_number,
+            'note' => $this->payment_note,
+        ]);
+
+        $honor = MonthlyHonor::findOrFail($this->selectedHonorId);
+
+        $totalPaid = (int) $honor->payments()->sum('amount');
 
         $honor->update([
-            'payment_status' => 'paid',
-            'paid_at' => now(),
+            'payment_status' => $totalPaid >= $honor->grand_total ? 'paid' : 'partial',
+            'paid_at' => $totalPaid >= $honor->grand_total ? now() : null,
         ]);
+
+        $this->showPaymentModal = false;
+        $this->resetPaymentForm();
+
+        session()->flash('success', 'Pembayaran honor berhasil disimpan.');
     }
 
     public function markAsUnpaid(int $id): void
     {
         $honor = MonthlyHonor::findOrFail($id);
 
+        $honor->payments()->delete();
+
         $honor->update([
             'payment_status' => 'unpaid',
             'paid_at' => null,
         ]);
+
+        session()->flash('success', 'Status pembayaran dikembalikan menjadi belum dibayar.');
+    }
+
+    private function resetPaymentForm(): void
+    {
+        $this->selectedHonorId = null;
+        $this->payment_date = '';
+        $this->payment_amount = 0;
+        $this->payment_method = 'cash';
+        $this->reference_number = '';
+        $this->payment_note = '';
+        $this->resetValidation();
     }
 
     public function render()
     {
         $honors = MonthlyHonor::query()
-            ->with('teacher')
+            ->with(['teacher', 'payments'])
             ->where('month', $this->month)
             ->where('year', $this->year)
             ->when($this->search, fn ($query) =>
@@ -81,11 +148,22 @@ class Index extends Component
             )
             ->latest()
             ->paginate(10);
+        $totalPaid = \App\Models\HonorPayment::whereHas('monthlyHonor', function ($query) {
+            $query->where('month', $this->month)
+                ->where('year', $this->year);
+        })->sum('amount');
 
+        $totalGrand = MonthlyHonor::where('month', $this->month)
+            ->where('year', $this->year)
+            ->sum('grand_total');
 
         return view('livewire.monthly-honors.index', [
             'honors' => $honors,
-
+            'totalPaid' => $totalPaid,
+            'totalRemaining' => max($totalGrand - $totalPaid, 0),
+            'totalTeachers' => MonthlyHonor::where('month', $this->month)
+                ->where('year', $this->year)
+                ->count(),
             'totalGrand' => MonthlyHonor::where('month', $this->month)
                 ->where('year', $this->year)
                 ->sum('grand_total'),
@@ -98,9 +176,9 @@ class Index extends Component
                 ->where('year', $this->year)
                 ->sum('total_teaching_honor'),
 
-             'totalDeduction' => MonthlyHonor::where('month', $this->month)
-            ->where('year', $this->year)
-            ->sum('total_deduction'),
+            'totalDeduction' => MonthlyHonor::where('month', $this->month)
+                ->where('year', $this->year)
+                ->sum('total_deduction'),
 
             'totalAdditionalHonor' => MonthlyHonor::where('month', $this->month)
                 ->where('year', $this->year)

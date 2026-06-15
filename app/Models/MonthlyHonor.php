@@ -25,4 +25,9 @@ class MonthlyHonor extends Model
     {
         return $this->belongsTo(Teacher::class);
     }
+
+    public function payments()
+    {
+        return $this->hasMany(HonorPayment::class);
+    }
 }

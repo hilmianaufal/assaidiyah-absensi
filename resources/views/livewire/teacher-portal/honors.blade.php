@@ -30,7 +30,7 @@
             </select>
         </section>
 
-        <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                 <p class="text-sm text-slate-500">Honor Mengajar</p>
                 <h3 class="text-2xl font-black text-slate-900">
@@ -45,12 +45,52 @@
                 </h3>
             </div>
 
-            <div class="bg-gradient-to-br from-blue-700 to-sky-500 rounded-3xl p-5 shadow-xl text-white">
+            <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                <p class="text-sm text-slate-500">Potongan Alpa</p>
+                <h3 class="text-2xl font-black text-red-600">
+                    - Rp{{ number_format($honor?->total_deduction ?? 0, 0, ',', '.') }}
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">
+                    {{ $honor?->total_absent_hours ?? 0 }} JP tidak hadir
+                </p>
+            </div>
+
+
+         <div class="bg-gradient-to-br from-blue-700 to-sky-500 rounded-3xl p-5 shadow-xl text-white">
                 <p class="text-sm text-blue-100">Total Honor</p>
                 <h3 class="text-2xl font-black">
                     Rp{{ number_format($honor?->grand_total ?? 0, 0, ',', '.') }}
                 </h3>
             </div>
+            @if ($honor->payments->count())
+                <div class="mt-4 rounded-2xl bg-slate-50 p-4">
+                    <p class="text-xs font-black text-slate-500 mb-3">
+                        Riwayat Pembayaran
+                    </p>
+
+                    <div class="space-y-2">
+                        @foreach ($honor->payments as $payment)
+                            <div class="flex items-center justify-between gap-3 rounded-xl bg-white p-3">
+                                <div>
+                                    <p class="font-bold text-slate-800">
+                                        {{ \Carbon\Carbon::parse($payment->payment_date)->translatedFormat('d F Y') }}
+                                    </p>
+                                    <p class="text-xs text-slate-500">
+                                        {{ strtoupper($payment->payment_method) }}
+                                        @if ($payment->reference_number)
+                                            • {{ $payment->reference_number }}
+                                        @endif
+                                    </p>
+                                </div>
+
+                                <p class="font-black text-emerald-700">
+                                    Rp{{ number_format($payment->amount, 0, ',', '.') }}
+                                </p>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
         </section>
 
         <section class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
@@ -146,5 +186,32 @@
                 @endforelse
             </div>
         </section>
+        @if ($honor && $honor->payments->count())
+            <section class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                <h3 class="text-xl font-black mb-4">Riwayat Pembayaran</h3>
+
+                <div class="space-y-3">
+                    @foreach ($honor->payments as $payment)
+                        <div class="rounded-2xl bg-emerald-50 p-4 flex items-center justify-between gap-4">
+                            <div>
+                                <p class="font-black text-slate-900">
+                                    Rp{{ number_format($payment->amount, 0, ',', '.') }}
+                                </p>
+
+                                <p class="text-sm text-slate-500">
+                                    {{ \Carbon\Carbon::parse($payment->payment_date)->translatedFormat('d F Y') }}
+                                    • {{ strtoupper($payment->payment_method) }}
+                                </p>
+                            </div>
+
+                            <a href="{{ route('honor-payments.receipt', $payment->id) }}"
+                                class="px-4 py-2 rounded-2xl bg-white text-blue-700 font-black">
+                                Bukti
+                            </a>
+                        </div>
+                    @endforeach
+                </div>
+            </section>
+        @endif
     </div>
 </div>
