@@ -19,6 +19,7 @@ class MonthlyHonor extends Model
         'grand_total',
         'payment_status',
         'paid_at',
+        'institution_id',
     ];
 
     public function teacher()
@@ -29,5 +30,10 @@ class MonthlyHonor extends Model
     public function payments()
     {
         return $this->hasMany(HonorPayment::class);
+    }
+
+    public function institution()
+    {
+        return $this->belongsTo(Institution::class);
     }
 }

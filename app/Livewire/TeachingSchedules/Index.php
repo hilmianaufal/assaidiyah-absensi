@@ -2,6 +2,7 @@
 
 namespace App\Livewire\TeachingSchedules;
 
+use App\Models\Institution;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TeachingSchedule;
@@ -15,6 +16,7 @@ class Index extends Component
     public string $search = '';
     public string $day = '';
 
+    public string $institution_id = '';
     public string $teacher_id = '';
     public string $subject_id = '';
     public string $class_name = '';
@@ -56,13 +58,14 @@ class Index extends Component
         $schedule = TeachingSchedule::findOrFail($id);
 
         $this->editingId = $schedule->id;
+        $this->institution_id = (string) $schedule->institution_id;
         $this->teacher_id = (string) $schedule->teacher_id;
         $this->subject_id = (string) $schedule->subject_id;
         $this->class_name = $schedule->class_name;
         $this->day = $schedule->day;
         $this->start_time = substr($schedule->start_time, 0, 5);
         $this->end_time = substr($schedule->end_time, 0, 5);
-        $this->hours_count = $schedule->hours_count;
+        $this->hours_count = (int) $schedule->hours_count;
 
         $this->showModal = true;
     }
@@ -70,6 +73,7 @@ class Index extends Component
     public function save(): void
     {
         $data = $this->validate([
+            'institution_id' => ['required', 'exists:institutions,id'],
             'teacher_id' => ['required', 'exists:teachers,id'],
             'subject_id' => ['required', 'exists:subjects,id'],
             'class_name' => ['required', 'string', 'max:100'],
@@ -86,16 +90,21 @@ class Index extends Component
 
         $this->showModal = false;
         $this->resetForm();
+
+        session()->flash('success', 'Jadwal mengajar berhasil disimpan.');
     }
 
     public function delete(int $id): void
     {
         TeachingSchedule::findOrFail($id)->delete();
+
+        session()->flash('success', 'Jadwal mengajar berhasil dihapus.');
     }
 
     private function resetForm(): void
     {
         $this->editingId = null;
+        $this->institution_id = '';
         $this->teacher_id = '';
         $this->subject_id = '';
         $this->class_name = '';
@@ -109,13 +118,16 @@ class Index extends Component
     public function render()
     {
         $schedules = TeachingSchedule::query()
-            ->with(['teacher', 'subject'])
+            ->with(['institution', 'teacher', 'subject'])
             ->when($this->search, function ($query) {
                 $query->where('class_name', 'like', '%' . $this->search . '%')
                     ->orWhereHas('teacher', fn ($q) =>
                         $q->where('name', 'like', '%' . $this->search . '%')
                     )
                     ->orWhereHas('subject', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('institution', fn ($q) =>
                         $q->where('name', 'like', '%' . $this->search . '%')
                     );
             })
@@ -125,10 +137,23 @@ class Index extends Component
             ->latest()
             ->paginate(10);
 
-            return view('livewire.teaching-schedules.index', [
+        return view('livewire.teaching-schedules.index', [
             'schedules' => $schedules,
-            'teachers' => Teacher::where('is_active', true)->orderBy('name')->get(),
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+            'teachers' => Teacher::where('is_active', true)
+                        ->when($this->institution_id, function ($query) {
+                            $query->whereHas('institutions', function ($q) {
+                                $q->where('institutions.id', $this->institution_id);
+                            });
+                        })
+                        ->orderBy('name')
+                        ->get(),
             'subjects' => Subject::orderBy('name')->get(),
         ])->layout('layouts.app');
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacher_id = '';
     }
 }

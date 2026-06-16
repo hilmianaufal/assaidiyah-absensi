@@ -7,9 +7,11 @@
         <section class="rounded-3xl bg-gradient-to-r from-blue-700 via-blue-600 to-sky-400 p-6 text-white shadow-xl">
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
                 <div>
-                    <p class="text-blue-100 text-sm">Akademik</p>
+                    <p class="text-blue-100 text-sm">Akademik Multi Lembaga</p>
                     <h1 class="text-2xl lg:text-3xl font-extrabold">Jadwal Mengajar</h1>
-                    <p class="text-blue-50 mt-2">Kelola guru, mata pelajaran, kelas, dan jam mengajar.</p>
+                    <p class="text-blue-50 mt-2">
+                        Kelola jadwal mengajar berdasarkan lembaga MTs, SMK, dan MA.
+                    </p>
                 </div>
 
                 <button wire:click="create"
@@ -20,6 +22,12 @@
             </div>
         </section>
 
+        @if (session('success'))
+            <div class="rounded-2xl bg-emerald-100 text-emerald-700 p-4 font-bold">
+                {{ session('success') }}
+            </div>
+        @endif
+
         <section class="grid lg:grid-cols-3 gap-4">
             <div class="lg:col-span-2 bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                 <div class="relative">
@@ -27,7 +35,7 @@
                     <input
                         wire:model.live.debounce.300ms="search"
                         type="text"
-                        placeholder="Cari guru, mapel, atau kelas..."
+                        placeholder="Cari lembaga, guru, mapel, atau kelas..."
                         class="w-full pl-12 pr-4 py-3 rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
                 </div>
             </div>
@@ -48,9 +56,21 @@
                 <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                     <div class="flex items-start justify-between gap-4">
                         <div>
-                            <p class="text-sm text-slate-500">{{ $schedule->day }}</p>
-                            <h3 class="font-bold text-lg">{{ $schedule->subject->name }}</h3>
-                            <p class="text-sm text-slate-500">{{ $schedule->teacher->name }}</p>
+                            <p class="text-xs font-black text-blue-600">
+                                {{ $schedule->institution?->name ?? 'Belum ada lembaga' }}
+                            </p>
+
+                            <p class="text-sm text-slate-500 mt-1">
+                                {{ $schedule->day }}
+                            </p>
+
+                            <h3 class="font-bold text-lg">
+                                {{ $schedule->subject->name }}
+                            </h3>
+
+                            <p class="text-sm text-slate-500">
+                                {{ $schedule->teacher->name }}
+                            </p>
                         </div>
 
                         <div class="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center">
@@ -66,7 +86,9 @@
 
                         <div class="rounded-2xl bg-slate-50 p-3">
                             <p class="text-xs text-slate-500">Jam</p>
-                            <p class="font-semibold">{{ substr($schedule->start_time, 0, 5) }}</p>
+                            <p class="font-semibold">
+                                {{ substr($schedule->start_time, 0, 5) }}
+                            </p>
                         </div>
 
                         <div class="rounded-2xl bg-slate-50 p-3">
@@ -99,6 +121,7 @@
             <table class="w-full">
                 <thead class="bg-slate-50 text-left text-sm text-slate-500">
                     <tr>
+                        <th class="p-5">Lembaga</th>
                         <th class="p-5">Hari</th>
                         <th class="p-5">Guru</th>
                         <th class="p-5">Mata Pelajaran</th>
@@ -112,6 +135,11 @@
                 <tbody class="divide-y divide-slate-100">
                     @forelse ($schedules as $schedule)
                         <tr>
+                            <td class="p-5">
+                                <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-black">
+                                    {{ $schedule->institution?->name ?? '-' }}
+                                </span>
+                            </td>
                             <td class="p-5 font-bold">{{ $schedule->day }}</td>
                             <td class="p-5">{{ $schedule->teacher->name }}</td>
                             <td class="p-5">{{ $schedule->subject->name }}</td>
@@ -137,7 +165,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="p-8 text-center text-slate-500">
+                            <td colspan="8" class="p-8 text-center text-slate-500">
                                 Belum ada jadwal mengajar.
                             </td>
                         </tr>
@@ -157,7 +185,9 @@
                         <h3 class="text-xl font-extrabold">
                             {{ $editingId ? 'Edit Jadwal' : 'Tambah Jadwal' }}
                         </h3>
-                        <p class="text-sm text-slate-500">Atur guru, mata pelajaran, kelas, dan waktu mengajar.</p>
+                        <p class="text-sm text-slate-500">
+                            Atur lembaga, guru, mata pelajaran, kelas, dan waktu mengajar.
+                        </p>
                     </div>
 
                     <button wire:click="$set('showModal', false)" class="p-2 rounded-xl bg-slate-100">
@@ -166,6 +196,20 @@
                 </div>
 
                 <form wire:submit="save" class="space-y-4">
+                    <div>
+                        <label class="text-sm font-semibold">Lembaga</label>
+                        <select wire:model="institution_id"
+                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
+                            <option value="">Pilih Lembaga</option>
+                            @foreach ($institutions as $institution)
+                                <option value="{{ $institution->id }}">
+                                    {{ $institution->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('institution_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    </div>
+
                     <div class="grid sm:grid-cols-2 gap-4">
                         <div>
                             <label class="text-sm font-semibold">Guru</label>
@@ -207,7 +251,7 @@
 
                         <div>
                             <label class="text-sm font-semibold">Kelas</label>
-                            <input wire:model="class_name" type="text" placeholder="Contoh: X IPA 1"
+                            <input wire:model="class_name" type="text" placeholder="Contoh: X IPA 1 / XI SMK"
                                 class="mt-1 w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
                             @error('class_name') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
                         </div>

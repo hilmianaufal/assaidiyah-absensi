@@ -13,10 +13,15 @@ class TeacherHonorPackage extends Model
         'monthly_honor',
         'deduction_per_hour',
         'is_active',
+        'institution_id',
     ];
 
     public function teacher()
     {
         return $this->belongsTo(Teacher::class);
+    }
+    public function institution()
+    {
+        return $this->belongsTo(Institution::class);
     }
 }

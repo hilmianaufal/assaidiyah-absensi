@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Teachers;
 
+use App\Models\Institution;
 use App\Models\Teacher;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -11,7 +12,7 @@ class Index extends Component
     use WithPagination;
 
     public string $search = '';
-
+    public array $institution_ids = [];
     public string $name = '';
     public string $nip = '';
     public string $phone = '';
@@ -44,7 +45,10 @@ class Index extends Component
         $this->hourly_rate = $teacher->hourly_rate;
         $this->is_active = (bool) $teacher->is_active;
         $this->is_picket_officer = (bool) $teacher->is_picket_officer;
-
+        $this->institution_ids = $teacher
+            ->institutions()
+            ->pluck('institutions.id')
+            ->toArray();
         $this->showModal = true;
     }
 
@@ -59,9 +63,13 @@ class Index extends Component
             'is_picket_officer' => ['boolean'],
         ]);
 
-        Teacher::updateOrCreate(
+        $teacher = Teacher::updateOrCreate(
             ['id' => $this->editingId],
             $data
+        );
+
+        $teacher->institutions()->sync(
+            $this->institution_ids
         );
 
         $this->showModal = false;
@@ -77,6 +85,7 @@ class Index extends Component
     {
         $this->editingId = null;
         $this->name = '';
+        $this->institution_ids = [];
         $this->nip = '';
         $this->phone = '';
         $this->hourly_rate = 25000;
@@ -99,7 +108,8 @@ class Index extends Component
             ->paginate(10);
 
         return view('livewire.teachers.index', [
-            'teachers' => $teachers,
-        ])->layout('layouts.app');
+    'teachers' => $teachers,
+        'institutions' => Institution::orderBy('name')->get(),
+    ])->layout('layouts.app');
     }
 }

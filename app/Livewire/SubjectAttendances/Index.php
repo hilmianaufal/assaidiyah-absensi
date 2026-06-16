@@ -47,13 +47,14 @@ class Index extends Component
             'teaching_schedule_id' => ['required', 'exists:teaching_schedules,id'],
         ]);
 
-        $schedule = TeachingSchedule::with(['teacher', 'subject'])
+        $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
             ->findOrFail($this->teaching_schedule_id);
 
         $teachingHonor = $schedule->hours_count * $schedule->teacher->hourly_rate;
 
         SubjectAttendance::updateOrCreate(
             [
+                'institution_id' => $schedule->institution_id,
                 'teacher_id' => $schedule->teacher_id,
                 'subject_id' => $schedule->subject_id,
                 'teaching_schedule_id' => $schedule->id,

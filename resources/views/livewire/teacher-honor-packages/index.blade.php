@@ -7,10 +7,10 @@
         <section class="rounded-3xl bg-gradient-to-r from-blue-700 via-blue-600 to-sky-400 p-6 text-white shadow-xl">
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
                 <div>
-                    <p class="text-blue-100 text-sm">Master Honor</p>
+                    <p class="text-blue-100 text-sm">Master Honor Multi Lembaga</p>
                     <h1 class="text-2xl lg:text-3xl font-extrabold">Paket Honor Guru</h1>
                     <p class="text-blue-50 mt-2">
-                        Atur honor bulanan berdasarkan paket jam mengajar mingguan dan potongan ketidakhadiran.
+                        Atur paket honor guru berdasarkan lembaga MTs, SMK, dan MA.
                     </p>
                 </div>
 
@@ -32,7 +32,7 @@
             <div class="relative">
                 <i data-lucide="search" class="w-5 h-5 absolute left-4 top-3.5 text-slate-400"></i>
                 <input wire:model.live.debounce.300ms="search" type="text"
-                    placeholder="Cari guru..."
+                    placeholder="Cari guru atau lembaga..."
                     class="w-full pl-12 pr-4 py-3 rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
             </div>
         </section>
@@ -47,9 +47,12 @@
                             </div>
 
                             <div>
-                                <p class="text-sm text-slate-500">Guru</p>
-                                <h3 class="text-lg font-black text-slate-900">
-                                    {{ $package->teacher->name }}
+                                <p class="text-xs font-black text-blue-600">
+                                    {{ $package->institution?->name ?? '-' }}
+                                </p>
+
+                                <h3 class="text-lg font-black text-slate-900 mt-1">
+                                    {{ $package->teacher?->name ?? '-' }}
                                 </h3>
 
                                 <p class="text-sm text-slate-500 mt-1">
@@ -118,6 +121,22 @@
                 </p>
 
                 <form wire:submit="save" class="space-y-4">
+                    <div>
+                        <label class="text-sm font-bold">Lembaga</label>
+                        <select wire:model="institutionId"
+                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
+                            <option value="">Pilih Lembaga</option>
+                            @foreach ($institutions as $institution)
+                                <option value="{{ $institution->id }}">
+                                    {{ $institution->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('institutionId')
+                            <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+
                     <div>
                         <label class="text-sm font-bold">Guru</label>
                         <select wire:model="teacherId"

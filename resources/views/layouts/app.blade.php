@@ -28,6 +28,7 @@
                 @php
                     $adminMenus = [
                         ['route' => 'dashboard', 'icon' => 'layout-dashboard', 'label' => 'Dashboard'],
+                        ['route' => 'finance-dashboard.index', 'icon' => 'chart-no-axes-combined', 'label' => 'Dashboard Bendahara'],
                         ['route' => 'face-attendance.index', 'icon' => 'scan-face', 'label' => 'Absensi Wajah'],
                         ['route' => 'face-enrollment.index', 'icon' => 'scan-line', 'label' => 'Registrasi Wajah'],
                         ['route' => 'teachers.index', 'icon' => 'users', 'label' => 'Data Guru'],

@@ -3,6 +3,7 @@
 namespace App\Livewire\AdditionalHonors;
 
 use App\Models\AdditionalHonor;
+use App\Models\Institution;
 use App\Models\Teacher;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -15,6 +16,7 @@ class Index extends Component
     public int $month;
     public int $year;
 
+    public string $institution_id = '';
     public string $teacher_id = '';
     public string $title = '';
     public int $amount = 0;
@@ -34,6 +36,16 @@ class Index extends Component
         $this->resetPage();
     }
 
+    public function updatedMonth(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedYear(): void
+    {
+        $this->resetPage();
+    }
+
     public function create(): void
     {
         $this->resetForm();
@@ -45,11 +57,12 @@ class Index extends Component
         $honor = AdditionalHonor::findOrFail($id);
 
         $this->editingId = $honor->id;
+        $this->institution_id = (string) $honor->institution_id;
         $this->teacher_id = (string) $honor->teacher_id;
         $this->title = $honor->title;
-        $this->month = $honor->month;
-        $this->year = $honor->year;
-        $this->amount = $honor->amount;
+        $this->month = (int) $honor->month;
+        $this->year = (int) $honor->year;
+        $this->amount = (int) $honor->amount;
         $this->note = $honor->note ?? '';
 
         $this->showModal = true;
@@ -58,6 +71,7 @@ class Index extends Component
     public function save(): void
     {
         $data = $this->validate([
+            'institution_id' => ['required', 'exists:institutions,id'],
             'teacher_id' => ['required', 'exists:teachers,id'],
             'title' => ['required', 'string', 'max:255'],
             'month' => ['required', 'integer', 'min:1', 'max:12'],
@@ -87,6 +101,7 @@ class Index extends Component
     private function resetForm(): void
     {
         $this->editingId = null;
+        $this->institution_id = '';
         $this->teacher_id = '';
         $this->title = '';
         $this->amount = 0;
@@ -96,7 +111,7 @@ class Index extends Component
 
     public function render()
     {
-        $additionalHonors = AdditionalHonor::with('teacher')
+        $additionalHonors = AdditionalHonor::with(['teacher', 'institution'])
             ->where('month', $this->month)
             ->where('year', $this->year)
             ->when($this->search, function ($query) {
@@ -104,6 +119,9 @@ class Index extends Component
                     $q->where('title', 'like', '%' . $this->search . '%')
                         ->orWhereHas('teacher', function ($teacherQuery) {
                             $teacherQuery->where('name', 'like', '%' . $this->search . '%');
+                        })
+                        ->orWhereHas('institution', function ($institutionQuery) {
+                            $institutionQuery->where('name', 'like', '%' . $this->search . '%');
                         });
                 });
             })
@@ -112,9 +130,27 @@ class Index extends Component
 
         return view('livewire.additional-honors.index', [
             'additionalHonors' => $additionalHonors,
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
             'teachers' => Teacher::where('is_active', true)
+                ->when($this->institution_id, function ($query) {
+                    $query->whereHas('institutions', function ($q) {
+                        $q->where('institutions.id', $this->institution_id);
+                    });
+                })
                 ->orderBy('name')
                 ->get(),
         ])->layout('layouts.app');
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacher_id = '';
+    }
+
+    public function updated($property): void
+    {
+        if ($property === 'institution_id') {
+            $this->teacher_id = '';
+        }
     }
 }

@@ -4,6 +4,7 @@ namespace App\Livewire\MonthlyHonors;
 
 use App\Exports\MonthlyHonorsExport;
 use App\Models\HonorPayment;
+use App\Models\Institution;
 use App\Models\MonthlyHonor;
 use Illuminate\Support\Facades\Artisan;
 use Livewire\Component;
@@ -15,6 +16,7 @@ class Index extends Component
     use WithPagination;
 
     public string $search = '';
+    public string $institutionId = '';
     public int $month;
     public int $year;
 
@@ -33,20 +35,10 @@ class Index extends Component
         $this->year = (int) now()->format('Y');
     }
 
-    public function updatedSearch(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedMonth(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedYear(): void
-    {
-        $this->resetPage();
-    }
+    public function updatedSearch(): void { $this->resetPage(); }
+    public function updatedMonth(): void { $this->resetPage(); }
+    public function updatedYear(): void { $this->resetPage(); }
+    public function updatedInstitutionId(): void { $this->resetPage(); }
 
     public function generate(): void
     {
@@ -71,7 +63,6 @@ class Index extends Component
         $this->payment_method = 'cash';
         $this->reference_number = '';
         $this->payment_note = '';
-
         $this->showPaymentModal = true;
     }
 
@@ -96,7 +87,6 @@ class Index extends Component
         ]);
 
         $honor = MonthlyHonor::findOrFail($this->selectedHonorId);
-
         $totalPaid = (int) $honor->payments()->sum('amount');
 
         $honor->update([
@@ -135,62 +125,65 @@ class Index extends Component
         $this->resetValidation();
     }
 
-    public function render()
-    {
-        $honors = MonthlyHonor::query()
-            ->with(['teacher', 'payments'])
-            ->where('month', $this->month)
-            ->where('year', $this->year)
-            ->when($this->search, fn ($query) =>
-                $query->whereHas('teacher', fn ($q) =>
-                    $q->where('name', 'like', '%' . $this->search . '%')
-                )
-            )
-            ->latest()
-            ->paginate(10);
-        $totalPaid = \App\Models\HonorPayment::whereHas('monthlyHonor', function ($query) {
-            $query->where('month', $this->month)
-                ->where('year', $this->year);
-        })->sum('amount');
-
-        $totalGrand = MonthlyHonor::where('month', $this->month)
-            ->where('year', $this->year)
-            ->sum('grand_total');
-
-        return view('livewire.monthly-honors.index', [
-            'honors' => $honors,
-            'totalPaid' => $totalPaid,
-            'totalRemaining' => max($totalGrand - $totalPaid, 0),
-            'totalTeachers' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->count(),
-            'totalGrand' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->sum('grand_total'),
-
-            'totalTransport' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->sum('total_transport'),
-
-            'totalTeachingHonor' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->sum('total_teaching_honor'),
-
-            'totalDeduction' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->sum('total_deduction'),
-
-            'totalAdditionalHonor' => MonthlyHonor::where('month', $this->month)
-                ->where('year', $this->year)
-                ->sum('total_additional_honor'),
-        ])->layout('layouts.app');
-    }
-
     public function exportExcel()
     {
         return Excel::download(
             new MonthlyHonorsExport($this->month, $this->year),
             'rekap-honor-' . $this->month . '-' . $this->year . '.xlsx'
         );
+    }
+
+    public function render()
+    {
+        $honors = MonthlyHonor::query()
+            ->with(['teacher', 'institution', 'payments'])
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->when($this->institutionId, fn ($query) =>
+                $query->where('institution_id', $this->institutionId)
+            )
+            ->when($this->search, function ($query) {
+                $query->where(function ($q) {
+                    $q->whereHas('teacher', fn ($teacherQuery) =>
+                        $teacherQuery->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('institution', fn ($institutionQuery) =>
+                        $institutionQuery->where('name', 'like', '%' . $this->search . '%')
+                    );
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        $summaryQuery = MonthlyHonor::where('month', $this->month)
+            ->where('year', $this->year)
+            ->when($this->institutionId, fn ($query) =>
+                $query->where('institution_id', $this->institutionId)
+            );
+
+        $totalGrand = (clone $summaryQuery)->sum('grand_total');
+
+        $totalPaid = HonorPayment::whereHas('monthlyHonor', function ($query) {
+            $query->where('month', $this->month)
+                ->where('year', $this->year)
+                ->when($this->institutionId, fn ($q) =>
+                    $q->where('institution_id', $this->institutionId)
+                );
+        })->sum('amount');
+
+        return view('livewire.monthly-honors.index', [
+            'honors' => $honors,
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+
+            'totalGrand' => $totalGrand,
+            'totalPaid' => $totalPaid,
+            'totalRemaining' => max($totalGrand - $totalPaid, 0),
+            'totalTeachers' => (clone $summaryQuery)->count(),
+
+            'totalTransport' => (clone $summaryQuery)->sum('total_transport'),
+            'totalTeachingHonor' => (clone $summaryQuery)->sum('total_teaching_honor'),
+            'totalDeduction' => (clone $summaryQuery)->sum('total_deduction'),
+            'totalAdditionalHonor' => (clone $summaryQuery)->sum('total_additional_honor'),
+        ])->layout('layouts.app');
     }
 }

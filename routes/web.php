@@ -28,6 +28,8 @@ use App\Livewire\Teachers\Index as TeachersIndex;
 use App\Livewire\TeachingSchedules\Index as TeachingSchedulesIndex;
 use App\Livewire\Users\Index as UsersIndex;
 use Illuminate\Support\Facades\Route;
+use App\Livewire\FinanceDashboard\Index as FinanceDashboardIndex;
+use App\Http\Controllers\InstitutionHonorReportPdfController;
 
 
 Route::get('/', function () {
@@ -36,10 +38,14 @@ Route::get('/', function () {
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard', DashboardIndex::class)->name('dashboard');
-
+    Route::get('/finance-dashboard', FinanceDashboardIndex::class)
+    ->name('finance-dashboard.index');
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+
+Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [InstitutionHonorReportPdfController::class, 'show'])
+    ->name('honor-reports.institution.pdf');
 
     Route::get('/teachers', TeachersIndex::class)->name('teachers.index');
     Route::get('/subjects', SubjectsIndex::class)->name('subjects.index');
@@ -69,6 +75,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/teacher/honors', TeacherHonors::class)->name('teacher.honors');
 
     Route::get('/monthly-honors/{honor}/pdf', [HonorPdfController::class, 'show'])->name('monthly-honors.pdf');
+    Route::get('/teacher/honors/{honor}/pdf', [TeacherHonorPdfController::class, 'downloadByHonor'])
+    ->name('teacher.honors.pdf-by-honor');
     Route::get('/teacher/honors/pdf/{month}/{year}', [TeacherHonorPdfController::class, 'download'])->name('teacher.honors.pdf');
     Route::get('/subject-attendances/pdf/{date}', [SubjectAttendancePdfController::class, 'show'])->name('subject-attendances.pdf');
     Route::get('/daily-attendances/pdf/{date}', [DailyAttendancePdfController::class, 'show'])->name('daily-attendances.pdf');

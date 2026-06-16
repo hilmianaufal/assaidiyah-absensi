@@ -2,6 +2,7 @@
 
 namespace App\Livewire\TeacherHonorPackages;
 
+use App\Models\Institution;
 use App\Models\Teacher;
 use App\Models\TeacherHonorPackage;
 use Livewire\Component;
@@ -12,6 +13,8 @@ class Index extends Component
     use WithPagination;
 
     public string $search = '';
+
+    public string $institutionId = '';
     public string $teacherId = '';
 
     public int $weeklyHours = 0;
@@ -55,6 +58,7 @@ class Index extends Component
         $package = TeacherHonorPackage::findOrFail($id);
 
         $this->editingId = $package->id;
+        $this->institutionId = (string) $package->institution_id;
         $this->teacherId = (string) $package->teacher_id;
         $this->weeklyHours = (int) $package->weekly_hours;
         $this->packageRate = (int) $package->package_rate;
@@ -70,14 +74,17 @@ class Index extends Component
         $this->calculateHonor();
 
         $this->validate([
+            'institutionId' => ['required', 'exists:institutions,id'],
             'teacherId' => ['required', 'exists:teachers,id'],
             'weeklyHours' => ['required', 'integer', 'min:1'],
             'packageRate' => ['required', 'integer', 'min:0'],
+            'isActive' => ['boolean'],
         ]);
 
         TeacherHonorPackage::updateOrCreate(
             ['id' => $this->editingId],
             [
+                'institution_id' => $this->institutionId,
                 'teacher_id' => $this->teacherId,
                 'weekly_hours' => $this->weeklyHours,
                 'package_rate' => $this->packageRate,
@@ -103,6 +110,7 @@ class Index extends Component
     private function resetForm(): void
     {
         $this->editingId = null;
+        $this->institutionId = '';
         $this->teacherId = '';
         $this->weeklyHours = 0;
         $this->packageRate = 0;
@@ -114,10 +122,13 @@ class Index extends Component
 
     public function render()
     {
-        $packages = TeacherHonorPackage::with('teacher')
+        $packages = TeacherHonorPackage::with(['teacher', 'institution'])
             ->when($this->search, function ($query) {
                 $query->whereHas('teacher', function ($teacherQuery) {
                     $teacherQuery->where('name', 'like', '%' . $this->search . '%');
+                })
+                ->orWhereHas('institution', function ($institutionQuery) {
+                    $institutionQuery->where('name', 'like', '%' . $this->search . '%');
                 });
             })
             ->latest()
@@ -125,7 +136,20 @@ class Index extends Component
 
         return view('livewire.teacher-honor-packages.index', [
             'packages' => $packages,
-            'teachers' => Teacher::where('is_active', true)->orderBy('name')->get(),
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+            'teachers' => Teacher::where('is_active', true)
+                        ->when($this->institutionId, function ($query) {
+                            $query->whereHas('institutions', function ($q) {
+                                $q->where('institutions.id', $this->institutionId);
+                            });
+                        })
+                        ->orderBy('name')
+                        ->get(),
         ])->layout('layouts.app');
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacherId = '';
     }
 }

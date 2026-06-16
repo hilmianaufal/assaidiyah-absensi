@@ -14,6 +14,7 @@ class TeachingSchedule extends Model
     'start_time',
     'end_time',
     'hours_count',
+    'institution_id',
 ];
 
 public function teacher()
@@ -24,5 +25,10 @@ public function teacher()
 public function subject()
 {
     return $this->belongsTo(Subject::class);
+}
+
+public function institution()
+{
+    return $this->belongsTo(Institution::class);
 }
 }

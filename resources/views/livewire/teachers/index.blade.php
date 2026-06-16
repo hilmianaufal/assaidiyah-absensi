@@ -39,6 +39,7 @@
                     <th class="px-6 py-5">NIP</th>
                     <th class="px-6 py-5">Kontak</th>
                     <th class="px-6 py-5">Honor</th>
+                    <th class="px-6 py-5">Lembaga</th>
                     <th class="px-6 py-5">Piket</th>
                     <th class="px-6 py-5">Status</th>
                     <th class="px-6 py-5 text-right">Aksi</th>
@@ -94,7 +95,15 @@
                                 </div>
                             </div>
                         </td>
-
+                            <td class="px-6 py-5">
+                                <div class="flex flex-wrap gap-2">
+                                    @foreach($teacher->institutions as $institution)
+                                        <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-black">
+                                            {{ $institution->name }}
+                                        </span>
+                                    @endforeach
+                                </div>
+                            </td>
                         <td class="px-6 py-5">
                             @if ($teacher->is_picket_officer)
                                 <span class="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-black text-blue-700">
@@ -175,7 +184,27 @@
 
                 <input wire:model="phone" type="text" placeholder="No HP"
                     class="w-full rounded-2xl border-slate-200">
+                    <div class="rounded-2xl border border-slate-200 p-4">
+                        <p class="font-black text-slate-900 mb-3">
+                            Lembaga Mengajar
+                        </p>
 
+                        <div class="space-y-2">
+                            @foreach($institutions as $institution)
+                                <label class="flex items-center gap-3">
+                                    <input
+                                        type="checkbox"
+                                        wire:model="institution_ids"
+                                        value="{{ $institution->id }}"
+                                        class="rounded border-slate-300">
+
+                                    <span>
+                                        {{ $institution->name }}
+                                    </span>
+                                </label>
+                            @endforeach
+                        </div>
+                    </div>
                 <input wire:model="hourly_rate" type="number" placeholder="Honor per JP"
                     class="w-full rounded-2xl border-slate-200">
                     <label class="flex items-center gap-3 p-4 rounded-2xl bg-slate-50">

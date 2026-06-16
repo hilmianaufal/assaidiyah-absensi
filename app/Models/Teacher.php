@@ -39,5 +39,10 @@ public function honorPackage()
     return $this->hasOne(TeacherHonorPackage::class);
 }
 
+public function institutions()
+{
+    return $this->belongsToMany(Institution::class)->withTimestamps();
+}
+
 
 }

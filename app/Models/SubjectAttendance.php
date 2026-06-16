@@ -15,7 +15,7 @@ protected $fillable = [
     'source',
     'attendance_status',
     'recorded_at',
-
+    'institution_id',
     'teaching_date',
     'start_time',
     'end_time',
@@ -25,6 +25,7 @@ protected $fillable = [
     'class_name',
     'status',
     'note',
+
 ];
 
 public function teacher()
@@ -40,6 +41,11 @@ public function subject()
 public function recordedByTeacher()
 {
     return $this->belongsTo(Teacher::class, 'recorded_by_teacher_id');
+}
+
+public function institution()
+{
+    return $this->belongsTo(Institution::class);
 }
 
 }
