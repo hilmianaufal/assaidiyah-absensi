@@ -151,7 +151,11 @@
             <i data-lucide="book-open" class="w-5 h-5"></i>
             Jadwal Saya
         </a>
-
+        <a href="{{ route('teacher.profile') }}"
+        class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.profile') ? 'bg-white/15' : '' }}">
+            <i data-lucide="user-round" class="w-5 h-5"></i>
+            Profile Saya
+        </a>
         @if(auth()->user()->teacher?->is_picket_officer)
             <a href="{{ route('picket-reports.create') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('picket-reports.create') ? 'bg-white/15' : '' }}">
                 <i data-lucide="clipboard-check" class="w-5 h-5"></i>
@@ -279,7 +283,11 @@
                     <i data-lucide="book-open" class="w-5 h-5"></i>
                     Jadwal
                 </a>
-
+                <a href="{{ route('teacher.profile') }}"
+                class="min-w-[58px] flex flex-col items-center gap-1 {{ request()->routeIs('teacher.profile') ? 'text-blue-600' : 'text-slate-500' }}">
+                    <i data-lucide="user-round" class="w-5 h-5"></i>
+                    Profil
+                </a>
                 @if(auth()->user()->teacher?->is_picket_officer)
                     <a href="{{ route('picket-reports.create') }}" class="min-w-[58px] flex flex-col items-center gap-1 {{ request()->routeIs('picket-reports.create') ? 'text-blue-600' : 'text-slate-500' }}">
                         <i data-lucide="clipboard-check" class="w-5 h-5"></i>
