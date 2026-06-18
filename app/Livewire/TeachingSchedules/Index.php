@@ -26,7 +26,13 @@ class Index extends Component
 
     public ?int $editingId = null;
     public bool $showModal = false;
+    public bool $showBulkModal = false;
 
+    public string $bulk_day = '';
+
+    public string $bulk_teacher_id = '';
+
+    public array $scheduleRows = [];
     public array $days = [
         'Senin',
         'Selasa',
@@ -53,6 +59,81 @@ class Index extends Component
         $this->showModal = true;
     }
 
+    public function createBulk(): void
+    {
+        $this->bulk_day = '';
+        $this->bulk_teacher_id = '';
+
+        $this->scheduleRows = [
+            [
+                'institution_id' => '',
+                'subject_id' => '',
+                'class_name' => '',
+                'start_time' => '',
+                'end_time' => '',
+                'hours_count' => 1,
+            ]
+        ];
+
+        $this->showBulkModal = true;
+    }
+
+    public function addRow(): void
+    {
+        $this->scheduleRows[] = [
+            'institution_id' => '',
+            'subject_id' => '',
+            'class_name' => '',
+            'start_time' => '',
+            'end_time' => '',
+            'hours_count' => 1,
+        ];
+    }
+
+    public function saveBulk(): void
+    {
+        $this->validate([
+            'bulk_teacher_id' => [
+                'required',
+                'exists:teachers,id'
+            ],
+
+            'bulk_day' => [
+                'required'
+            ],
+        ]);
+
+        foreach ($this->scheduleRows as $row) {
+
+            TeachingSchedule::create([
+                'institution_id' => $row['institution_id'],
+                'teacher_id' => $this->bulk_teacher_id,
+                'subject_id' => $row['subject_id'],
+                'class_name' => $row['class_name'],
+                'day' => $this->bulk_day,
+                'start_time' => $row['start_time'],
+                'end_time' => $row['end_time'],
+                'hours_count' => $row['hours_count'],
+            ]);
+        }
+
+        $this->showBulkModal = false;
+
+        session()->flash(
+            'success',
+            'Jadwal massal berhasil disimpan.'
+        );
+    }
+
+    public function removeRow(int $index): void
+    {
+        unset($this->scheduleRows[$index]);
+
+        $this->scheduleRows = array_values(
+            $this->scheduleRows
+        );
+    }
+
     public function edit(int $id): void
     {
         $schedule = TeachingSchedule::findOrFail($id);
@@ -68,6 +149,7 @@ class Index extends Component
         $this->hours_count = (int) $schedule->hours_count;
 
         $this->showModal = true;
+
     }
 
     public function save(): void

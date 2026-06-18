@@ -30,7 +30,7 @@ use App\Livewire\Users\Index as UsersIndex;
 use Illuminate\Support\Facades\Route;
 use App\Livewire\FinanceDashboard\Index as FinanceDashboardIndex;
 use App\Http\Controllers\InstitutionHonorReportPdfController;
-
+use App\Livewire\TransportSettings\Index as TransportSettingsIndex;
 
 Route::get('/', function () {
     return view('auth.login');
@@ -86,6 +86,10 @@ Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [Insti
     ->name('teacher-honor-packages.index');
     Route::get('/honor-payments/{payment}/receipt', [HonorPaymentReceiptController::class, 'show'])
     ->name('honor-payments.receipt');
+
+    Route::get('/transport-settings', TransportSettingsIndex::class)
+    ->middleware(['auth'])
+    ->name('transport-settings.index');
 });
 
 require __DIR__.'/auth.php';

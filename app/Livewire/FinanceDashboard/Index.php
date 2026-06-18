@@ -5,6 +5,7 @@ namespace App\Livewire\FinanceDashboard;
 use App\Models\HonorPayment;
 use App\Models\Institution;
 use App\Models\MonthlyHonor;
+use App\Models\SubjectAttendance;
 use Livewire\Component;
 
 class Index extends Component
@@ -58,6 +59,8 @@ class Index extends Component
 
                 $total = (int) $institutionHonors->sum('grand_total');
 
+
+
                 return [
                     'institution' => $institution,
                     'total_honor' => $total,
@@ -67,11 +70,41 @@ class Index extends Component
                     'total_records' => $institutionHonors->count(),
                 ];
             });
+            $runningTeachingHonor = SubjectAttendance::whereMonth('teaching_date', $this->month)
+            ->whereYear('teaching_date', $this->year)
+            ->whereIn('attendance_status', ['present', 'late'])
+            ->sum('teaching_honor');
 
+            $runningHours = SubjectAttendance::whereMonth('teaching_date', $this->month)
+                ->whereYear('teaching_date', $this->year)
+                ->whereIn('attendance_status', ['present', 'late'])
+                ->sum('hours_count');
+
+            $runningByInstitution = Institution::where('is_active', true)
+                ->orderBy('name')
+                ->get()
+                ->map(function ($institution) {
+                    return [
+                        'institution' => $institution,
+                        'running_honor' => SubjectAttendance::where('institution_id', $institution->id)
+                            ->whereMonth('teaching_date', $this->month)
+                            ->whereYear('teaching_date', $this->year)
+                            ->whereIn('attendance_status', ['present', 'late'])
+                            ->sum('teaching_honor'),
+                        'running_hours' => SubjectAttendance::where('institution_id', $institution->id)
+                            ->whereMonth('teaching_date', $this->month)
+                            ->whereYear('teaching_date', $this->year)
+                            ->whereIn('attendance_status', ['present', 'late'])
+                            ->sum('hours_count'),
+                    ];
+                });
         return view('livewire.finance-dashboard.index', [
             'totalHonor' => $totalHonor,
             'totalPaid' => $totalPaid,
             'totalRemaining' => $totalRemaining,
+            'runningTeachingHonor' => $runningTeachingHonor,
+            'runningHours' => $runningHours,
+            'runningByInstitution' => $runningByInstitution,
             'totalTeachers' => $honors->pluck('teacher_id')->unique()->count(),
             'totalRecords' => $honors->count(),
             'institutionSummaries' => $institutionSummaries,

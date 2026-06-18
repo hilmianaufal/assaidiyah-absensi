@@ -75,6 +75,53 @@
             </div>
         </section>
 
+        <section class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                <p class="text-sm text-slate-500">Honor Berjalan</p>
+                <h3 class="text-2xl font-black text-emerald-700">
+                    Rp{{ number_format($runningTeachingHonor ?? 0, 0, ',', '.') }}
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">
+                    Dari absensi mapel bulan ini
+                </p>
+            </div>
+
+            <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                <p class="text-sm text-slate-500">JP Hadir Berjalan</p>
+                <h3 class="text-2xl font-black text-blue-700">
+                    {{ $runningHours ?? 0 }} JP
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">
+                    Hadir / terlambat
+                </p>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+            <h3 class="text-xl font-black text-slate-900 mb-4">
+                Honor Berjalan Per Lembaga
+            </h3>
+
+            <div class="space-y-3">
+                @foreach ($runningByInstitution as $item)
+                    <div class="rounded-2xl bg-slate-50 p-4 flex items-center justify-between">
+                        <div>
+                            <p class="font-black text-slate-900">
+                                {{ $item['institution']->name }}
+                            </p>
+                            <p class="text-sm text-slate-500">
+                                {{ $item['running_hours'] }} JP hadir
+                            </p>
+                        </div>
+
+                        <p class="font-black text-emerald-700">
+                            Rp{{ number_format($item['running_honor'], 0, ',', '.') }}
+                        </p>
+                    </div>
+                @endforeach
+            </div>
+        </section>
+
         <section class="grid lg:grid-cols-3 gap-4">
             @foreach ($institutionSummaries as $summary)
                 <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">

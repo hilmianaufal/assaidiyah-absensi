@@ -4,10 +4,10 @@ namespace App\Livewire\FaceAttendance;
 
 use App\Models\DailyAttendance;
 use App\Models\Teacher;
+use App\Models\TransportSetting;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
-
 
 class Index extends Component
 {
@@ -24,7 +24,7 @@ class Index extends Component
         $this->mode = $mode;
     }
 
-   public function saveAttendanceByTeacherId($teacherId, ?string $photoBase64 = null): array
+    public function saveAttendanceByTeacherId($teacherId, ?string $photoBase64 = null): array
     {
         $teacher = Teacher::findOrFail($teacherId);
         $now = now();
@@ -47,6 +47,19 @@ class Index extends Component
         return $this->saveCheckOut($attendance, $teacher, $now);
     }
 
+    private function setting(): ?TransportSetting
+    {
+        return TransportSetting::where('is_active', true)->first();
+    }
+
+    private function isBetween(Carbon $now, string $start, string $end): bool
+    {
+        $startTime = Carbon::createFromTimeString($start);
+        $endTime = Carbon::createFromTimeString($end);
+
+        return $now->betweenIncluded($startTime, $endTime);
+    }
+
     private function saveCheckIn(DailyAttendance $attendance, Teacher $teacher, Carbon $now): array
     {
         if ($attendance->check_in_time) {
@@ -58,29 +71,36 @@ class Index extends Component
             ];
         }
 
-        $start = Carbon::createFromTimeString('06:45:00');
-        $end = Carbon::createFromTimeString('07:15:00');
+        $setting = $this->setting();
 
-        $isTransport = $now->betweenIncluded($start, $end);
+        $isValidCheckIn = false;
+
+        if ($setting) {
+            $isValidCheckIn = $this->isBetween(
+                $now,
+                $setting->check_in_start,
+                $setting->check_in_end
+            );
+        }
 
         $attendance->update([
             'attendance_time' => $now->format('H:i:s'),
             'check_in_time' => $now->format('H:i:s'),
-            'check_in_status' => $isTransport ? 'ontime' : 'late',
-            'transport_amount' => $isTransport ? 10000 : 0,
-            'note' => $isTransport
-                ? 'Hadir tepat waktu, mendapat transport.'
-                : 'Hadir di luar waktu transport, hanya menggugurkan kewajiban.',
+            'check_in_status' => $isValidCheckIn ? 'ontime' : 'late',
+            'transport_amount' => 0,
+            'note' => $isValidCheckIn
+                ? 'Absen masuk valid. Transport menunggu absen pulang.'
+                : 'Absen masuk di luar waktu transport.',
         ]);
 
-        $this->addLog($teacher->name, 'Masuk', $now->format('H:i:s'), $isTransport ? 10000 : 0);
+        $this->addLog($teacher->name, 'Masuk', $now->format('H:i:s'), 0);
 
         return [
             'status' => 'success',
             'type' => 'check_in',
             'name' => $teacher->name,
-            'transport' => $isTransport ? 10000 : 0,
-            'message' => $teacher->name . ' berhasil absen masuk pukul ' . $now->format('H:i'),
+            'transport' => 0,
+            'message' => $teacher->name . ' berhasil absen masuk pukul ' . $now->format('H:i') . '. Transport menunggu absen pulang.',
         ];
     }
 
@@ -104,22 +124,43 @@ class Index extends Component
             ];
         }
 
-        $minimumCheckout = Carbon::createFromTimeString('13:00:00');
-        $isNormal = $now->greaterThanOrEqualTo($minimumCheckout);
+        $setting = $this->setting();
+
+        $isValidCheckIn = $attendance->check_in_status === 'ontime';
+        $isValidCheckOut = false;
+        $transportAmount = 0;
+
+        if ($setting) {
+            $isValidCheckOut = $this->isBetween(
+                $now,
+                $setting->check_out_start,
+                $setting->check_out_end
+            );
+
+            if ($isValidCheckIn && $isValidCheckOut) {
+                $transportAmount = (int) $setting->amount;
+            }
+        }
 
         $attendance->update([
             'check_out_time' => $now->format('H:i:s'),
-            'check_out_status' => $isNormal ? 'normal' : 'early',
+            'check_out_status' => $isValidCheckOut ? 'normal' : 'early',
+            'transport_amount' => $transportAmount,
+            'note' => $transportAmount > 0
+                ? 'Absen masuk dan pulang valid. Mendapat transport.'
+                : 'Transport tidak cair karena absen masuk/pulang tidak sesuai waktu.',
         ]);
 
-        $this->addLog($teacher->name, 'Pulang', $now->format('H:i:s'), $attendance->transport_amount);
+        $this->addLog($teacher->name, 'Pulang', $now->format('H:i:s'), $transportAmount);
 
         return [
             'status' => 'success',
             'type' => 'check_out',
             'name' => $teacher->name,
-            'checkout_status' => $isNormal ? 'normal' : 'early',
-            'message' => $teacher->name . ' berhasil absen pulang pukul ' . $now->format('H:i'),
+            'checkout_status' => $isValidCheckOut ? 'normal' : 'early',
+            'transport' => $transportAmount,
+            'message' => $teacher->name . ' berhasil absen pulang pukul ' . $now->format('H:i') .
+                '. Transport: Rp' . number_format($transportAmount, 0, ',', '.'),
         ];
     }
 
@@ -135,14 +176,14 @@ class Index extends Component
 
     public function render()
     {
-        return view('livewire.face-attendance.index', [
+
+     return view('livewire.face-attendance.index', [
             'teachers' => Teacher::where('is_active', true)
                 ->whereNotNull('face_descriptor')
                 ->orderBy('name')
                 ->get(),
         ])->layout('layouts.app');
     }
-
 
     private function saveBase64Photo(?string $photoBase64, string $folder): ?string
     {

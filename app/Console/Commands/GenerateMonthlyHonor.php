@@ -23,129 +23,83 @@ class GenerateMonthlyHonor extends Command
         $month = (int) ($this->argument('month') ?: $targetDate->month);
         $year = (int) ($this->argument('year') ?: $targetDate->year);
 
-        $institutions = Institution::where('is_active', true)->get();
-        $warnings = [];
+        $packages = TeacherHonorPackage::with(['teacher', 'institution'])
+            ->where('is_active', true)
+            ->get();
 
-        foreach ($institutions as $institution) {
+        foreach ($packages as $package) {
+            $teacher = $package->teacher;
+            $institution = $package->institution;
 
-            $teachers = $institution->teachers()
-                ->where('is_active', true)
-                ->get();
-
-            foreach ($teachers as $teacher) {
-
-                $hasPackage = TeacherHonorPackage::where('teacher_id', $teacher->id)
-                    ->where('institution_id', $institution->id)
-                    ->where('is_active', true)
-                    ->exists();
-
-                if (! $hasPackage) {
-                    $warnings[] =
-                        "{$teacher->name} belum memiliki paket honor di {$institution->name}";
-                }
-            }
-        }
-
-        if (count($warnings)) {
-
-            $this->warn('');
-            $this->warn('==============================');
-            $this->warn('VALIDASI DATA HONOR');
-            $this->warn('==============================');
-
-            foreach ($warnings as $warning) {
-                $this->warn($warning);
+            if (! $teacher || ! $teacher->is_active || ! $institution) {
+                continue;
             }
 
-            $this->warn('');
-            $this->warn('Silakan lengkapi data terlebih dahulu.');
-
-            return Command::FAILURE;
-        }
-        foreach ($institutions as $institution) {
-            $packages = TeacherHonorPackage::with('teacher')
+            $subjectQuery = SubjectAttendance::where('teacher_id', $teacher->id)
                 ->where('institution_id', $institution->id)
-                ->where('is_active', true)
-                ->get();
+                ->whereMonth('teaching_date', $month)
+                ->whereYear('teaching_date', $year);
 
-            foreach ($packages as $package) {
-                $teacher = $package->teacher;
+            $totalTeachingHours = (int) $subjectQuery->sum('hours_count');
 
-                if (! $teacher || ! $teacher->is_active) {
-                    continue;
-                }
+            $baseTeachingHonor = (int) $package->monthly_honor;
 
-                $subjectQuery = SubjectAttendance::where('teacher_id', $teacher->id)
-                    ->where('institution_id', $institution->id)
-                    ->whereMonth('teaching_date', $month)
-                    ->whereYear('teaching_date', $year);
+            $totalAdditionalHonor = (int) AdditionalHonor::where('teacher_id', $teacher->id)
+                ->where('institution_id', $institution->id)
+                ->where('month', $month)
+                ->where('year', $year)
+                ->sum('amount');
 
-                $totalTeachingHours = (int) $subjectQuery->sum('hours_count');
+            $totalAbsentHours = (int) SubjectAttendance::where('teacher_id', $teacher->id)
+                ->where('institution_id', $institution->id)
+                ->whereMonth('teaching_date', $month)
+                ->whereYear('teaching_date', $year)
+                ->where('attendance_status', 'absent')
+                ->sum('hours_count');
 
-                $baseTeachingHonor = (int) $package->monthly_honor;
+            $totalDeduction = (int) ($totalAbsentHours * $package->deduction_per_hour);
 
-                $totalAdditionalHonor = (int) AdditionalHonor::where('teacher_id', $teacher->id)
-                    ->where('institution_id', $institution->id)
-                    ->where('month', $month)
-                    ->where('year', $year)
-                    ->sum('amount');
+            $alreadyHasTransport = MonthlyHonor::where('teacher_id', $teacher->id)
+                ->where('month', $month)
+                ->where('year', $year)
+                ->where('total_transport', '>', 0)
+                ->exists();
 
-                $totalAbsentHours = (int) SubjectAttendance::where('teacher_id', $teacher->id)
-                    ->where('institution_id', $institution->id)
-                    ->whereMonth('teaching_date', $month)
-                    ->whereYear('teaching_date', $year)
-                    ->where('attendance_status', 'absent')
-                    ->sum('hours_count');
+            $totalTransport = 0;
 
-                $totalDeduction = (int) ($totalAbsentHours * $package->deduction_per_hour);
-
-                /*
-                 * Transport tetap GLOBAL, bukan per lembaga.
-                 * Supaya tidak dobel, transport hanya dimasukkan ke lembaga pertama
-                 * yang diproses untuk guru tersebut pada bulan itu.
-                 */
-                $alreadyHasTransport = MonthlyHonor::where('teacher_id', $teacher->id)
-                    ->where('month', $month)
-                    ->where('year', $year)
-                    ->where('total_transport', '>', 0)
-                    ->exists();
-
-                $totalTransport = 0;
-
-                if (! $alreadyHasTransport) {
-                    $totalTransport = (int) DailyAttendance::where('teacher_id', $teacher->id)
-                        ->whereMonth('attendance_date', $month)
-                        ->whereYear('attendance_date', $year)
-                        ->sum('transport_amount');
-                }
-
-                $grandTotal = $baseTeachingHonor
-                    + $totalTransport
-                    + $totalAdditionalHonor
-                    - $totalDeduction;
-
-                MonthlyHonor::updateOrCreate(
-                    [
-                        'teacher_id' => $teacher->id,
-                        'institution_id' => $institution->id,
-                        'month' => $month,
-                        'year' => $year,
-                    ],
-                    [
-                        'total_teaching_hours' => $totalTeachingHours,
-                        'total_teaching_honor' => $baseTeachingHonor,
-                        'total_transport' => $totalTransport,
-                        'total_additional_honor' => $totalAdditionalHonor,
-                        'total_absent_hours' => $totalAbsentHours,
-                        'total_deduction' => $totalDeduction,
-                        'grand_total' => max($grandTotal, 0),
-                        'payment_status' => 'unpaid',
-                    ]
-                );
+            if (! $alreadyHasTransport) {
+                $totalTransport = (int) DailyAttendance::where('teacher_id', $teacher->id)
+                    ->whereMonth('attendance_date', $month)
+                    ->whereYear('attendance_date', $year)
+                    ->sum('transport_amount');
             }
+
+            $grandTotal = $baseTeachingHonor
+                + $totalTransport
+                + $totalAdditionalHonor
+                - $totalDeduction;
+
+            MonthlyHonor::updateOrCreate(
+                [
+                    'teacher_id' => $teacher->id,
+                    'institution_id' => $institution->id,
+                    'month' => $month,
+                    'year' => $year,
+                ],
+                [
+                    'total_teaching_hours' => $totalTeachingHours,
+                    'total_teaching_honor' => $baseTeachingHonor,
+                    'total_transport' => $totalTransport,
+                    'total_additional_honor' => $totalAdditionalHonor,
+                    'total_absent_hours' => $totalAbsentHours,
+                    'total_deduction' => $totalDeduction,
+                    'grand_total' => max($grandTotal, 0),
+                    'payment_status' => 'unpaid',
+                ]
+            );
         }
 
-        $this->info("Rekap honor bulan {$month}-{$year} per lembaga berhasil dibuat.");
+        $this->info("Rekap honor bulan {$month}-{$year} berhasil dibuat dari paket honor aktif.");
 
         return Command::SUCCESS;
     }

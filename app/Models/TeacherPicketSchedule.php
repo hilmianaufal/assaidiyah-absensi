@@ -12,11 +12,17 @@ class TeacherPicketSchedule extends Model
         'start_time',
         'end_time',
         'is_active',
+        'institution_id',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
     ];
+
+    public function institution()
+    {
+        return $this->belongsTo(Institution::class);
+    }
 
     public function teacher()
     {

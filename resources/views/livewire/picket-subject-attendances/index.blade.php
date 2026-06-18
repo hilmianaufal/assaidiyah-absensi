@@ -11,7 +11,12 @@
                 Catat kehadiran guru mengajar sesuai jadwal hari ini.
             </p>
         </section>
-
+            @if($picketSchedule)
+                <div class="mb-4 rounded-2xl bg-blue-50 p-4 text-blue-700 font-bold">
+                    Jadwal piket hari ini:
+                    {{ $picketSchedule->institution?->name }}
+                </div>
+            @endif
         @if (! $isAllowed)
             <div class="rounded-3xl bg-red-50 border border-red-100 p-6 text-red-700">
                 <h3 class="text-xl font-black">Akses Ditolak</h3>

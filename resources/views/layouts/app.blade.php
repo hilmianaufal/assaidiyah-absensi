@@ -7,6 +7,22 @@
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        #faceOverlay{
+            animation: fadeInFace .25s ease;
+        }
+
+        @keyframes fadeInFace{
+            from{
+                opacity:0;
+                transform:scale(.9);
+            }
+            to{
+                opacity:1;
+                transform:scale(1);
+            }
+        }
+        </style>
 </head>
 
 <body class="min-h-screen bg-slate-50 text-slate-900">
@@ -23,71 +39,132 @@
             </div>
         </div>
 
-        <nav class="space-y-2 overflow-y-auto pr-1">
-            @if(auth()->user()->role === 'admin')
-                @php
-                    $adminMenus = [
-                        ['route' => 'dashboard', 'icon' => 'layout-dashboard', 'label' => 'Dashboard'],
-                        ['route' => 'finance-dashboard.index', 'icon' => 'chart-no-axes-combined', 'label' => 'Dashboard Bendahara'],
-                        ['route' => 'face-attendance.index', 'icon' => 'scan-face', 'label' => 'Absensi Wajah'],
-                        ['route' => 'face-enrollment.index', 'icon' => 'scan-line', 'label' => 'Registrasi Wajah'],
-                        ['route' => 'teachers.index', 'icon' => 'users', 'label' => 'Data Guru'],
-                        ['route' => 'subjects.index', 'icon' => 'book-open', 'label' => 'Mata Pelajaran'],
-                        ['route' => 'teaching-schedules.index', 'icon' => 'calendar-days', 'label' => 'Jadwal Mengajar'],
-                        ['route' => 'daily-attendances.index', 'icon' => 'calendar-check', 'label' => 'Absensi Harian'],
-                        ['route' => 'subject-attendances.index', 'icon' => 'book-check', 'label' => 'Absensi Mapel'],
-                        ['route' => 'picket-schedules.index', 'icon' => 'calendar-check', 'label' => 'Jadwal Piket'],
-                        ['route' => 'teacher-honor-packages.index', 'icon' => 'badge-dollar-sign', 'label' => 'Paket Honor'],
-                        ['route' => 'additional-honors.index', 'icon' => 'badge-dollar-sign', 'label' => 'Tambahan Honor'],
-                        ['route' => 'monthly-honors.index', 'icon' => 'wallet', 'label' => 'Rekap Honor'],
-                        ['route' => 'kiosk.index', 'icon' => 'monitor', 'label' => 'Kiosk Mode'],
-                        ['route' => 'users.index', 'icon' => 'user-cog', 'label' => 'Users'],
-                    ];
-                @endphp
+<nav class="space-y-3 overflow-y-auto pr-1" x-data="{ open: 'dashboard' }">
 
-                @foreach($adminMenus as $menu)
-                    <a href="{{ route($menu['route']) }}"
-                       class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs($menu['route']) ? 'bg-white/15' : '' }}">
-                        <i data-lucide="{{ $menu['icon'] }}" class="w-5 h-5"></i>
-                        {{ $menu['label'] }}
-                    </a>
-                @endforeach
-            @endif
+    @if(auth()->user()->role === 'admin')
 
-            @if(auth()->user()->role === 'guru')
-                <a href="{{ route('teacher.dashboard') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.dashboard') ? 'bg-white/15' : '' }}">
-                    <i data-lucide="graduation-cap" class="w-5 h-5"></i>
-                    Portal Guru
-                </a>
+        <a href="{{ route('dashboard') }}"
+            class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('dashboard') ? 'bg-white/15' : '' }}">
+            <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+            Dashboard
+        </a>
 
-                <a href="{{ route('teacher.attendances') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.attendances') ? 'bg-white/15' : '' }}">
-                    <i data-lucide="calendar-check" class="w-5 h-5"></i>
-                    Absensi Saya
-                </a>
+        <a href="{{ route('finance-dashboard.index') }}"
+            class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('finance-dashboard.index') ? 'bg-white/15' : '' }}">
+            <i data-lucide="chart-no-axes-combined" class="w-5 h-5"></i>
+            Dashboard Bendahara
+        </a>
 
-                <a href="{{ route('teacher.honors') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.honors') ? 'bg-white/15' : '' }}">
+        {{-- ABSENSI --}}
+        <div>
+            <button @click="open = open === 'absensi' ? '' : 'absensi'"
+                class="w-full flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-white/10">
+                <span class="flex items-center gap-3">
+                    <i data-lucide="scan-face" class="w-5 h-5"></i>
+                    Absensi
+                </span>
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </button>
+
+            <div x-show="open === 'absensi'" x-transition class="mt-2 ml-4 space-y-1 border-l border-white/20 pl-3">
+                <a href="{{ route('face-attendance.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('face-attendance.index') ? 'bg-white/15' : '' }}">Absensi Wajah</a>
+                <a href="{{ route('face-enrollment.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('face-enrollment.index') ? 'bg-white/15' : '' }}">Registrasi Wajah</a>
+                <a href="{{ route('daily-attendances.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('daily-attendances.index') ? 'bg-white/15' : '' }}">Absensi Harian</a>
+                <a href="{{ route('subject-attendances.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('subject-attendances.index') ? 'bg-white/15' : '' }}">Absensi Mapel</a>
+                <a href="{{ route('kiosk.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('kiosk.index') ? 'bg-white/15' : '' }}">Kiosk Mode</a>
+            </div>
+        </div>
+
+        {{-- MASTER DATA --}}
+        <div>
+            <button @click="open = open === 'master' ? '' : 'master'"
+                class="w-full flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-white/10">
+                <span class="flex items-center gap-3">
+                    <i data-lucide="database" class="w-5 h-5"></i>
+                    Master Data
+                </span>
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </button>
+
+            <div x-show="open === 'master'" x-transition class="mt-2 ml-4 space-y-1 border-l border-white/20 pl-3">
+                <a href="{{ route('teachers.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('teachers.index') ? 'bg-white/15' : '' }}">Data Guru</a>
+                <a href="{{ route('subjects.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('subjects.index') ? 'bg-white/15' : '' }}">Mata Pelajaran</a>
+                <a href="{{ route('teaching-schedules.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('teaching-schedules.index') ? 'bg-white/15' : '' }}">Jadwal Mengajar</a>
+                <a href="{{ route('picket-schedules.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('picket-schedules.index') ? 'bg-white/15' : '' }}">Jadwal Piket</a>
+            </div>
+        </div>
+
+        {{-- HONOR --}}
+        <div>
+            <button @click="open = open === 'honor' ? '' : 'honor'"
+                class="w-full flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-white/10">
+                <span class="flex items-center gap-3">
                     <i data-lucide="wallet" class="w-5 h-5"></i>
-                    Honor Saya
-                </a>
+                    Honor & Keuangan
+                </span>
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </button>
 
-                <a href="{{ route('teacher.schedules') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.schedules') ? 'bg-white/15' : '' }}">
-                    <i data-lucide="book-open" class="w-5 h-5"></i>
-                    Jadwal Saya
-                </a>
+            <div x-show="open === 'honor'" x-transition class="mt-2 ml-4 space-y-1 border-l border-white/20 pl-3">
+                <a href="{{ route('teacher-honor-packages.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('teacher-honor-packages.index') ? 'bg-white/15' : '' }}">Paket Honor</a>
+                <a href="{{ route('additional-honors.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('additional-honors.index') ? 'bg-white/15' : '' }}">Tambahan Honor</a>
+                <a href="{{ route('monthly-honors.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('monthly-honors.index') ? 'bg-white/15' : '' }}">Rekap Honor</a>
+                <a href="{{ route('transport-settings.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('transport-settings.index') ? 'bg-white/15' : '' }}">Transport</a>
+            </div>
+        </div>
 
-                @if(auth()->user()->teacher?->is_picket_officer)
-                    <a href="{{ route('picket-reports.create') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('picket-reports.create') ? 'bg-white/15' : '' }}">
-                        <i data-lucide="clipboard-check" class="w-5 h-5"></i>
-                        Laporan Piket
-                    </a>
+        {{-- SISTEM --}}
+        <div>
+            <button @click="open = open === 'sistem' ? '' : 'sistem'"
+                class="w-full flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-white/10">
+                <span class="flex items-center gap-3">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                    Sistem
+                </span>
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </button>
 
-                    <a href="{{ route('picket-subject-attendances.index') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('picket-subject-attendances.index') ? 'bg-white/15' : '' }}">
-                        <i data-lucide="book-check" class="w-5 h-5"></i>
-                        Absensi Mapel Piket
-                    </a>
-                @endif
-            @endif
-        </nav>
+            <div x-show="open === 'sistem'" x-transition class="mt-2 ml-4 space-y-1 border-l border-white/20 pl-3">
+                <a href="{{ route('users.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('users.index') ? 'bg-white/15' : '' }}">Users</a>
+            </div>
+        </div>
+
+    @endif
+
+    @if(auth()->user()->role === 'guru')
+        <a href="{{ route('teacher.dashboard') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.dashboard') ? 'bg-white/15' : '' }}">
+            <i data-lucide="graduation-cap" class="w-5 h-5"></i>
+            Portal Guru
+        </a>
+
+        <a href="{{ route('teacher.attendances') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.attendances') ? 'bg-white/15' : '' }}">
+            <i data-lucide="calendar-check" class="w-5 h-5"></i>
+            Absensi Saya
+        </a>
+
+        <a href="{{ route('teacher.honors') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.honors') ? 'bg-white/15' : '' }}">
+            <i data-lucide="wallet" class="w-5 h-5"></i>
+            Honor Saya
+        </a>
+
+        <a href="{{ route('teacher.schedules') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.schedules') ? 'bg-white/15' : '' }}">
+            <i data-lucide="book-open" class="w-5 h-5"></i>
+            Jadwal Saya
+        </a>
+
+        @if(auth()->user()->teacher?->is_picket_officer)
+            <a href="{{ route('picket-reports.create') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('picket-reports.create') ? 'bg-white/15' : '' }}">
+                <i data-lucide="clipboard-check" class="w-5 h-5"></i>
+                Laporan Piket
+            </a>
+
+            <a href="{{ route('picket-subject-attendances.index') }}" class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('picket-subject-attendances.index') ? 'bg-white/15' : '' }}">
+                <i data-lucide="book-check" class="w-5 h-5"></i>
+                Absensi Mapel Piket
+            </a>
+        @endif
+    @endif
+</nav>
     </aside>
 
     <main class="flex-1 min-w-0">

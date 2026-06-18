@@ -14,11 +14,19 @@
                     </p>
                 </div>
 
-                <button wire:click="create"
-                    class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white text-blue-700 font-bold shadow">
-                    <i data-lucide="calendar-plus" class="w-5 h-5"></i>
-                    Tambah Jadwal
-                </button>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button wire:click="createBulk"
+                        class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-amber-500 text-white font-bold shadow">
+                        <i data-lucide="table-properties" class="w-5 h-5"></i>
+                        Jadwal Massal
+                    </button>
+
+                    <button wire:click="create"
+                        class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white text-blue-700 font-bold shadow">
+                        <i data-lucide="calendar-plus" class="w-5 h-5"></i>
+                        Tambah Jadwal
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -295,4 +303,164 @@
             </div>
         </div>
     @endif
+
+
+    @if ($showBulkModal)
+    <div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+        <div class="w-full max-w-6xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+
+            <div class="flex items-center justify-between mb-5">
+                <div>
+                    <h3 class="text-2xl font-black">
+                        Jadwal Mengajar Massal
+                    </h3>
+
+                    <p class="text-sm text-slate-500">
+                        Input banyak jadwal sekaligus untuk satu guru.
+                    </p>
+                </div>
+
+                <button wire:click="$set('showBulkModal', false)"
+                    class="px-4 py-2 rounded-xl bg-slate-100">
+                    Tutup
+                </button>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-4 mb-5">
+                <div>
+                    <label class="text-sm font-bold">Guru</label>
+
+                    <select wire:model="bulk_teacher_id"
+                        class="mt-1 w-full rounded-2xl border-slate-200">
+                        <option value="">Pilih Guru</option>
+
+                        @foreach($teachers as $teacher)
+                            <option value="{{ $teacher->id }}">
+                                {{ $teacher->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div>
+                    <label class="text-sm font-bold">Hari</label>
+
+                    <select wire:model="bulk_day"
+                        class="mt-1 w-full rounded-2xl border-slate-200">
+                        <option value="">Pilih Hari</option>
+
+                        @foreach($days as $item)
+                            <option value="{{ $item }}">
+                                {{ $item }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b">
+                            <th class="p-3 text-left">Lembaga</th>
+                            <th class="p-3 text-left">Mapel</th>
+                            <th class="p-3 text-left">Kelas</th>
+                            <th class="p-3 text-left">Mulai</th>
+                            <th class="p-3 text-left">Selesai</th>
+                            <th class="p-3 text-left">JP</th>
+                            <th class="p-3"></th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach($scheduleRows as $index => $row)
+                            <tr>
+                                <td class="p-2">
+                                    <select wire:model="scheduleRows.{{ $index }}.institution_id"
+                                        class="w-full rounded-xl border-slate-200">
+
+                                        <option value="">Lembaga</option>
+
+                                        @foreach($institutions as $institution)
+                                            <option value="{{ $institution->id }}">
+                                                {{ $institution->name }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </td>
+
+                                <td class="p-2">
+                                    <select wire:model="scheduleRows.{{ $index }}.subject_id"
+                                        class="w-full rounded-xl border-slate-200">
+
+                                        <option value="">Mapel</option>
+
+                                        @foreach($subjects as $subject)
+                                            <option value="{{ $subject->id }}">
+                                                {{ $subject->name }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </td>
+
+                                <td class="p-2">
+                                    <input
+                                        wire:model="scheduleRows.{{ $index }}.class_name"
+                                        class="w-full rounded-xl border-slate-200">
+                                </td>
+
+                                <td class="p-2">
+                                    <input
+                                        type="time"
+                                        wire:model="scheduleRows.{{ $index }}.start_time"
+                                        class="w-full rounded-xl border-slate-200">
+                                </td>
+
+                                <td class="p-2">
+                                    <input
+                                        type="time"
+                                        wire:model="scheduleRows.{{ $index }}.end_time"
+                                        class="w-full rounded-xl border-slate-200">
+                                </td>
+
+                                <td class="p-2">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        wire:model="scheduleRows.{{ $index }}.hours_count"
+                                        class="w-full rounded-xl border-slate-200">
+                                </td>
+
+                                <td class="p-2">
+                                    <button
+                                        type="button"
+                                        wire:click="removeRow({{ $index }})"
+                                        class="px-3 py-2 rounded-xl bg-red-50 text-red-600">
+                                        Hapus
+                                    </button>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-between mt-6">
+                <button
+                    type="button"
+                    wire:click="addRow"
+                    class="px-5 py-3 rounded-2xl bg-slate-100 font-bold">
+                    + Tambah Baris
+                </button>
+
+                <button
+                    type="button"
+                    wire:click="saveBulk"
+                    class="px-6 py-3 rounded-2xl bg-blue-600 text-white font-bold">
+                    Simpan Semua Jadwal
+                </button>
+            </div>
+        </div>
+    </div>
+@endif
 </div>

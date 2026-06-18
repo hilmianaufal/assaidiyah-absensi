@@ -34,6 +34,9 @@
                         <p class="text-sm text-slate-500">
                             {{ substr($schedule->start_time, 0, 5) }} - {{ substr($schedule->end_time, 0, 5) }}
                         </p>
+                        <p class="text-xs font-black text-blue-600">
+                            {{ $schedule->institution?->name }}
+                        </p>
                     </div>
 
                     <div class="flex items-center gap-2">
@@ -80,6 +83,26 @@
                             <option value="{{ $teacher->id }}">{{ $teacher->name }}</option>
                         @endforeach
                     </select>
+
+                    <div>
+                        <label class="text-sm font-bold">
+                            Lembaga
+                        </label>
+
+                        <select wire:model="institution_id"
+                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
+
+                            <option value="">
+                                Pilih Lembaga
+                            </option>
+
+                            @foreach($institutions as $institution)
+                                <option value="{{ $institution->id }}">
+                                    {{ $institution->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </div>
 
                     <select wire:model="day"
                         class="w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">

@@ -12,26 +12,28 @@
             </p>
         </section>
 
-        @if (session('success'))
-            <div class="rounded-2xl bg-emerald-100 text-emerald-700 p-4 font-bold">
-                {{ session('success') }}
-            </div>
-        @endif
-
         <section class="grid lg:grid-cols-3 gap-6">
             <div class="lg:col-span-2 bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                 <div class="relative overflow-hidden rounded-3xl bg-slate-950 aspect-video flex items-center justify-center text-white">
                     <video id="enrollCamera" autoplay playsinline muted
                         class="absolute inset-0 w-full h-full object-cover"></video>
 
-                    <div class="absolute inset-0 pointer-events-none">
-                        <div class="absolute inset-8 border-2 border-blue-400/70 rounded-[2rem]"></div>
-                        <div class="absolute left-1/2 top-1/2 w-48 h-64 -translate-x-1/2 -translate-y-1/2 border-4 border-white/80 rounded-full shadow-2xl"></div>
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-slate-950/30 pointer-events-none"></div>
+
+                    <div class="absolute top-4 left-4 right-4 flex items-center justify-between gap-3">
+                        <div class="rounded-2xl bg-emerald-500/90 px-4 py-2 font-black text-sm shadow">
+                            AI Face Recognition
+                        </div>
+
+                        <div id="teacherOverlay"
+                            class="rounded-2xl bg-white/15 backdrop-blur-xl px-4 py-2 font-bold text-sm">
+                            Pilih guru terlebih dahulu
+                        </div>
                     </div>
 
                     <div class="absolute bottom-4 left-4 right-4 rounded-2xl bg-white/10 backdrop-blur-xl p-4">
-                        <p class="font-bold">Arahkan wajah guru ke kamera</p>
-                        <p class="text-sm text-blue-100">
+                        <p class="font-bold">Kamera bersih tanpa marker</p>
+                        <p id="cameraHint" class="text-sm text-blue-100">
                             Pastikan wajah terang, tidak blur, dan menghadap depan.
                         </p>
                     </div>
@@ -53,11 +55,11 @@
             <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
                 <h3 class="text-xl font-extrabold mb-2">Pilih Guru</h3>
                 <p class="text-sm text-slate-500 mb-5">
-                    Pilih guru yang akan diregistrasi wajahnya.
+                    Nama guru akan muncul langsung di dalam kamera.
                 </p>
 
                 <form wire:submit="saveFace" class="space-y-4">
-                    <select wire:model="teacher_id"
+                    <select wire:model="teacher_id" id="teacherSelect"
                         class="w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
                         <option value="">Pilih Guru</option>
                         @foreach ($teachers as $teacher)
@@ -92,9 +94,33 @@
         </section>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <script>
         let enrollVideo = null;
         let enrollModelsLoaded = false;
+        let captureCooldown = false;
+
+        function speakAI(text) {
+            if (!window.speechSynthesis) return;
+
+            window.speechSynthesis.cancel();
+
+            const speech = new SpeechSynthesisUtterance(text);
+            speech.lang = 'id-ID';
+            speech.rate = 1;
+            speech.pitch = 1;
+
+            window.speechSynthesis.speak(speech);
+        }
+
+        document.addEventListener('change', function (e) {
+            if (e.target.id !== 'teacherSelect') return;
+
+            const selected = e.target.options[e.target.selectedIndex]?.text || 'Pilih guru terlebih dahulu';
+
+            document.getElementById('teacherOverlay').innerText = selected;
+        });
 
         async function loadFaceModels() {
             if (enrollModelsLoaded) return;
@@ -125,20 +151,58 @@
                 });
 
                 enrollVideo.srcObject = stream;
-                document.getElementById('faceStatus').innerText = 'Kamera aktif, silakan ambil data wajah';
+
+                document.getElementById('faceStatus').innerText = 'Kamera aktif';
+                document.getElementById('cameraHint').innerText = 'Silakan ambil data wajah guru.';
+
+                speakAI('Kamera aktif. Silakan ambil data wajah.');
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Kamera aktif',
+                    timer: 1200,
+                    showConfirmButton: false
+                });
             } catch (error) {
                 console.error(error);
-                alert('Kamera tidak bisa diakses atau model belum tersedia.');
+
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Kamera gagal aktif',
+                    text: 'Periksa izin kamera atau file model wajah.'
+                });
             }
         }
 
         async function captureFaceDescriptor() {
+            if (captureCooldown) return;
+
+            captureCooldown = true;
+            setTimeout(() => {
+                captureCooldown = false;
+            }, 1000);
+
             if (!enrollVideo) {
-                alert('Aktifkan kamera dulu.');
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Kamera belum aktif',
+                    text: 'Aktifkan kamera terlebih dahulu.'
+                });
                 return;
             }
 
-            document.getElementById('faceStatus').innerText = 'Mendeteksi wajah...';
+            const teacherSelect = document.getElementById('teacherSelect');
+            if (!teacherSelect.value) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih guru dulu',
+                    text: 'Nama guru wajib dipilih sebelum ambil data wajah.'
+                });
+                return;
+            }
+
+            document.getElementById('faceStatus').innerText = 'AI sedang mendeteksi wajah...';
+            document.getElementById('cameraHint').innerText = 'AI sedang membaca pola wajah.';
 
             const detection = await faceapi
                 .detectSingleFace(enrollVideo, new faceapi.TinyFaceDetectorOptions({
@@ -150,7 +214,16 @@
 
             if (!detection) {
                 document.getElementById('faceStatus').innerText = 'Wajah tidak terdeteksi';
-                alert('Wajah tidak terdeteksi. Pastikan wajah jelas dan terang.');
+                document.getElementById('cameraHint').innerText = 'Pastikan wajah terang dan menghadap kamera.';
+
+                speakAI('Wajah tidak terdeteksi. Silakan coba lagi.');
+
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Wajah tidak terdeteksi',
+                    text: 'Pastikan wajah jelas, terang, dan menghadap depan.'
+                });
+
                 return;
             }
 
@@ -158,8 +231,24 @@
 
             @this.set('descriptor', JSON.stringify(descriptor));
 
+            const teacherName = teacherSelect.options[teacherSelect.selectedIndex].text
+                .replace('(Sudah Terdaftar)', '')
+                .replace('(Belum)', '')
+                .trim();
+
+            document.getElementById('teacherOverlay').innerText = 'Terdeteksi: ' + teacherName;
             document.getElementById('faceStatus').innerText = 'Data wajah berhasil diambil';
-            alert('Data wajah berhasil diambil. Klik Simpan Data Wajah.');
+            document.getElementById('cameraHint').innerText = 'Klik Simpan Data Wajah untuk menyimpan.';
+
+            speakAI('Data wajah ' + teacherName + ' berhasil direkam.');
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Wajah berhasil direkam',
+                text: teacherName,
+                timer: 1500,
+                showConfirmButton: false
+            });
         }
     </script>
 </div>

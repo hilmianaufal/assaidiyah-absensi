@@ -27,7 +27,7 @@
         </div>
     </div>
 
-    <main class="relative z-10 min-h-screen px-4 py-5 flex flex-col">
+    <main class="relative z-10 min-h-screen px-4 py-5 flex flex-col max-w-5xl mx-auto">
         <header class="mb-4">
             <div class="flex items-center justify-between gap-3">
                 <div>
@@ -72,41 +72,39 @@
             </button>
         </section>
 
-        <section class="relative flex-1 rounded-[2.2rem] overflow-hidden bg-slate-950 shadow-2xl border-[6px] border-white min-h-[430px]">
+        <section class="relative flex-1 rounded-[2rem] overflow-hidden bg-slate-950 shadow-2xl border border-white/80 min-h-[540px] md:min-h-[620px]">
             <video id="camera" autoplay playsinline muted
                 class="absolute inset-0 w-full h-full object-cover"></video>
 
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-slate-950/10"></div>
+            <canvas id="faceOverlay"
+                class="absolute inset-0 w-full h-full pointer-events-none z-20"></canvas>
 
-            <div class="absolute top-5 left-5 right-5 flex items-center justify-between">
-                <div class="rounded-full bg-white/15 backdrop-blur-xl px-4 py-2 text-white text-xs font-bold border border-white/20">
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/20 z-10"></div>
+
+            <div class="absolute top-4 left-4 right-4 z-30 flex items-center justify-between">
+                <div class="rounded-full bg-black/35 backdrop-blur-xl px-4 py-2 text-white text-xs font-black border border-white/10">
                     LIVE CAMERA
                 </div>
 
-                <div class="rounded-full bg-emerald-400/20 backdrop-blur-xl px-4 py-2 text-emerald-100 text-xs font-bold border border-emerald-300/20">
-                    REALTIME
+                <div id="cameraStatus"
+                    class="rounded-full bg-emerald-500/20 backdrop-blur-xl px-4 py-2 text-emerald-100 text-xs font-black border border-emerald-300/20">
+                    SIAP SCAN
                 </div>
             </div>
 
-            <div
-                class="absolute left-1/2 top-[43%] w-[210px] h-[270px] -translate-x-1/2 -translate-y-1/2 border-[5px] border-white rounded-full shadow-[0_0_50px_rgba(59,130,246,0.8)]">
-            </div>
+            <div class="absolute bottom-5 left-5 right-5 z-30">
+                <div class="rounded-[1.5rem] bg-black/35 backdrop-blur-xl border border-white/10 px-5 py-4 text-white">
+                    <p class="text-xs font-black tracking-[0.25em] text-blue-200 uppercase">
+                        Face Recognition
+                    </p>
 
-            <div class="absolute left-1/2 top-[43%] w-[250px] h-[310px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-blue-300/40"></div>
+                    <h3 id="detectedTeacher" class="mt-1 text-xl font-black">
+                        Menunggu Kamera
+                    </h3>
 
-            <div class="absolute bottom-0 left-0 right-0 p-5">
-                <div class="rounded-[2rem] bg-white/15 backdrop-blur-2xl border border-white/20 p-5 text-white">
-<p class="text-[10px] font-bold text-blue-100 uppercase tracking-[0.15em]">
-    Guru Terdeteksi
-</p>
-
-<h2 id="detectedTeacher" class="mt-1 text-xl font-black leading-tight">
-    Menunggu Wajah
-</h2>
-
-<p id="matchScore" class="mt-1 text-xs text-blue-100">
-    Aktifkan kamera untuk mulai scan
-</p>
+                    <p id="matchScore" class="text-sm text-white/70">
+                        Tekan tombol kamera untuk mulai scan.
+                    </p>
                 </div>
             </div>
         </section>
@@ -150,14 +148,16 @@
         async function loadAttendanceModels() {
             if (modelsLoaded) return;
 
-            document.getElementById('detectedTeacher').innerText = 'Memuat Model';
-            document.getElementById('matchScore').innerText = 'Mohon tunggu sebentar...';
+            setScanText('Memuat Model', 'Mohon tunggu sebentar...');
+            setCameraStatus('LOADING');
 
             await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
             await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
             await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
 
             modelsLoaded = true;
+
+            setCameraStatus('MODEL SIAP');
         }
 
         async function startCamera() {
@@ -183,13 +183,15 @@
 
                 attendanceVideo.srcObject = stream;
 
-                document.getElementById('detectedTeacher').innerText = 'Kamera Aktif';
-                document.getElementById('matchScore').innerText = 'Scan realtime berjalan...';
+                setScanText('Kamera Aktif', 'Scan realtime berjalan...');
+                setCameraStatus('REALTIME');
 
                 startRealtimeScan();
             } catch (error) {
                 console.error(error);
                 showPremiumPopup('warning', 'Kamera Gagal', 'Kamera tidak bisa diakses atau model wajah belum tersedia.', 'Error');
+                setScanText('Kamera Gagal', 'Pastikan izin kamera aktif dan folder /models tersedia.');
+                setCameraStatus('ERROR');
             }
         }
 
@@ -198,7 +200,7 @@
 
             scanInterval = setInterval(async () => {
                 await recognizeFaceRealtime();
-            }, 1500);
+            }, 800);
         }
 
         function stopRealtimeScan() {
@@ -207,8 +209,14 @@
                 scanInterval = null;
             }
 
-            document.getElementById('detectedTeacher').innerText = 'Scan Dihentikan';
-            document.getElementById('matchScore').innerText = 'Tekan Kamera untuk mulai lagi.';
+            if (attendanceVideo && attendanceVideo.srcObject) {
+                attendanceVideo.srcObject.getTracks().forEach(track => track.stop());
+                attendanceVideo.srcObject = null;
+            }
+
+            clearFaceOverlay();
+            setScanText('Scan Dihentikan', 'Tekan Kamera untuk mulai lagi.');
+            setCameraStatus('STOP');
         }
 
         async function recognizeFaceRealtime() {
@@ -223,8 +231,9 @@
                 .withFaceDescriptor();
 
             if (!detection) {
-                document.getElementById('detectedTeacher').innerText = 'Wajah Belum Terdeteksi';
-                document.getElementById('matchScore').innerText = 'Pastikan wajah jelas dan cahaya cukup.';
+                clearFaceOverlay();
+                setScanText('Wajah Belum Terdeteksi', 'Pastikan wajah jelas dan cahaya cukup.');
+                setCameraStatus('MENCARI WAJAH');
                 return;
             }
 
@@ -234,7 +243,18 @@
             registeredTeachers.forEach((teacher) => {
                 if (!teacher.descriptor) return;
 
-                const savedDescriptor = new Float32Array(teacher.descriptor);
+                let descriptorData = teacher.descriptor;
+
+                if (typeof descriptorData === 'string') {
+                    try {
+                        descriptorData = JSON.parse(descriptorData);
+                    } catch (error) {
+                        console.error('Descriptor guru rusak:', teacher.name, error);
+                        return;
+                    }
+                }
+
+                const savedDescriptor = new Float32Array(descriptorData);
                 const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
 
                 if (distance < bestDistance) {
@@ -244,26 +264,32 @@
             });
 
             if (!bestMatch || bestDistance > 0.45) {
-                document.getElementById('detectedTeacher').innerText = 'Tidak Dikenali';
-                document.getElementById('matchScore').innerText = 'Skor terlalu rendah: ' + bestDistance.toFixed(3);
+                drawFaceOverlay(detection, null, null);
+                setScanText('Tidak Dikenali', 'Wajah terdeteksi, tapi belum cocok dengan data guru.');
+                setCameraStatus('BELUM COCOK');
                 return;
             }
 
+            drawFaceOverlay(detection, bestMatch.name, bestDistance);
+
             const now = Date.now();
-            const cooldownMs = 20000;
+            const cooldownMs = 2000;
 
             if (lastDetectedTeacherId === bestMatch.id && now - lastDetectedAt < cooldownMs) {
-                document.getElementById('detectedTeacher').innerText = bestMatch.name;
-                document.getElementById('matchScore').innerText = 'Cooldown aktif, absensi tidak dobel.';
+                setScanText(bestMatch.name, 'Cooldown aktif, absensi tidak dobel.');
+                setCameraStatus('COOLDOWN');
                 return;
             }
 
             lastDetectedTeacherId = bestMatch.id;
             lastDetectedAt = now;
 
-            document.getElementById('detectedTeacher').innerText = bestMatch.name;
-            document.getElementById('matchScore').innerText =
-                'Kecocokan: ' + ((1 - bestDistance) * 100).toFixed(2) + '%';
+            setScanText(
+                bestMatch.name,
+                'Kecocokan: ' + ((1 - bestDistance) * 100).toFixed(2) + '%'
+            );
+
+            setCameraStatus('TERDETEKSI');
 
             const photoBase64 = captureCameraPhoto();
 
@@ -298,6 +324,68 @@
             }
         }
 
+        function drawFaceOverlay(detection, name = null, distance = null) {
+            const canvas = document.getElementById('faceOverlay');
+            const video = document.getElementById('camera');
+
+            if (!canvas || !video || !detection) return;
+
+            const displaySize = {
+                width: video.clientWidth,
+                height: video.clientHeight
+            };
+
+            canvas.width = displaySize.width;
+            canvas.height = displaySize.height;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const resizedDetection = faceapi.resizeResults(detection, displaySize);
+            const box = resizedDetection.detection.box;
+
+            const isDetected = !!name;
+
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = isDetected ? '#22c55e' : '#ffffff';
+            ctx.shadowColor = isDetected ? 'rgba(34,197,94,0.9)' : 'rgba(255,255,255,0.5)';
+            ctx.shadowBlur = 18;
+            ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+            if (isDetected) {
+                const label = distance
+                    ? `${name} • ${((1 - distance) * 100).toFixed(1)}%`
+                    : name;
+
+                const labelWidth = Math.max(190, label.length * 9);
+                const labelX = box.x;
+                const labelY = Math.max(12, box.y - 44);
+
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(34,197,94,0.96)';
+
+                if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(labelX, labelY, labelWidth, 36, 14);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(labelX, labelY, labelWidth, 36);
+                }
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 15px Arial';
+                ctx.fillText(label, labelX + 14, labelY + 23);
+            }
+        }
+
+        function clearFaceOverlay() {
+            const canvas = document.getElementById('faceOverlay');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
         function captureCameraPhoto() {
             const video = document.getElementById('camera');
 
@@ -311,6 +399,19 @@
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
             return canvas.toDataURL('image/jpeg', 0.85);
+        }
+
+        function setScanText(title, message) {
+            const detectedTeacher = document.getElementById('detectedTeacher');
+            const matchScore = document.getElementById('matchScore');
+
+            if (detectedTeacher) detectedTeacher.innerText = title;
+            if (matchScore) matchScore.innerText = message;
+        }
+
+        function setCameraStatus(text) {
+            const cameraStatus = document.getElementById('cameraStatus');
+            if (cameraStatus) cameraStatus.innerText = text;
         }
 
         function speakText(text) {

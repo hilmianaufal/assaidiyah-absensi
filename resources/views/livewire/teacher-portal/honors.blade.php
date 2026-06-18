@@ -48,6 +48,46 @@
             </p>
         </section>
 
+        <section class="grid grid-cols-4 gap-4">
+        <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+            <p class="text-sm text-slate-500">
+                Honor Mengajar Berjalan
+            </p>
+
+            <h3 class="text-2xl font-black text-emerald-700 mt-2">
+                Rp{{ number_format($runningTeachingHonor ?? 0, 0, ',', '.') }}
+            </h3>
+
+            <p class="text-xs text-slate-400 mt-2">
+                Akumulasi dari absensi mapel bulan ini.
+            </p>
+        </div>
+                <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                    <p class="text-sm text-slate-500">Transport Berjalan</p>
+
+                    <h3 class="text-2xl font-black text-amber-600 mt-2">
+                        Rp{{ number_format($runningTransport ?? 0, 0, ',', '.') }}
+                    </h3>
+
+                    <p class="text-xs text-slate-400 mt-2">
+                        Cair jika absen masuk dan pulang valid.
+                    </p>
+                </div>
+        <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+            <p class="text-sm text-slate-500">
+                Total JP Hadir
+            </p>
+
+            <h3 class="text-2xl font-black text-blue-700 mt-2">
+                {{ $runningHours ?? 0 }} JP
+            </h3>
+
+            <p class="text-xs text-slate-400 mt-2">
+                Total jam mengajar yang sudah hadir.
+            </p>
+        </div>
+    </section>
+
         <section class="grid gap-4">
             @forelse ($honors as $honor)
                 @php

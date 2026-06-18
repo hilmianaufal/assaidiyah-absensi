@@ -3,6 +3,7 @@
 namespace App\Livewire\PicketSubjectAttendances;
 
 use App\Models\SubjectAttendance;
+use App\Models\TeacherHonorPackage;
 use App\Models\TeacherPicketSchedule;
 use App\Models\TeachingSchedule;
 use Livewire\Component;
@@ -11,6 +12,9 @@ class Index extends Component
 {
     public string $dayName = '';
     public bool $isAllowed = false;
+
+    public ?int $picketInstitutionId = null;
+    public ?TeacherPicketSchedule $picketSchedule = null;
 
     public function mount(): void
     {
@@ -23,10 +27,19 @@ class Index extends Component
             return;
         }
 
-        $this->isAllowed = TeacherPicketSchedule::where('teacher_id', $teacher->id)
+        $this->picketSchedule = TeacherPicketSchedule::with('institution')
+            ->where('teacher_id', $teacher->id)
             ->where('day', $this->dayName)
             ->where('is_active', true)
-            ->exists();
+            ->first();
+
+        if (! $this->picketSchedule) {
+            $this->isAllowed = false;
+            return;
+        }
+
+        $this->picketInstitutionId = $this->picketSchedule->institution_id;
+        $this->isAllowed = true;
     }
 
     private function currentDayName(): string
@@ -44,7 +57,7 @@ class Index extends Component
 
     public function markAttendance(int $scheduleId, string $status): void
     {
-        if (! $this->isAllowed) {
+        if (! $this->isAllowed || ! $this->picketInstitutionId) {
             abort(403);
         }
 
@@ -54,13 +67,21 @@ class Index extends Component
 
         $picketTeacher = auth()->user()->teacher;
 
-        $schedule = TeachingSchedule::with(['teacher', 'subject'])
+        $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+            ->where('institution_id', $this->picketInstitutionId)
             ->findOrFail($scheduleId);
 
         $isPaid = in_array($status, ['present', 'late']);
 
+        $package = TeacherHonorPackage::where('teacher_id', $schedule->teacher_id)
+            ->where('institution_id', $schedule->institution_id)
+            ->where('is_active', true)
+            ->first();
+
+        $ratePerHour = $package?->deduction_per_hour ?? 0;
+
         $teachingHonor = $isPaid
-            ? $schedule->hours_count * $schedule->teacher->hourly_rate
+            ? ($schedule->hours_count * $ratePerHour)
             : 0;
 
         SubjectAttendance::updateOrCreate(
@@ -71,6 +92,7 @@ class Index extends Component
                 'teaching_date' => now()->toDateString(),
             ],
             [
+                'institution_id' => $schedule->institution_id,
                 'recorded_by_teacher_id' => $picketTeacher->id,
                 'source' => 'picket',
                 'attendance_status' => $status,
@@ -79,7 +101,7 @@ class Index extends Component
                 'start_time' => $schedule->start_time,
                 'end_time' => $schedule->end_time,
                 'hours_count' => $schedule->hours_count,
-                'hourly_rate' => $schedule->teacher->hourly_rate,
+                'hourly_rate' => $ratePerHour,
                 'teaching_honor' => $teachingHonor,
                 'class_name' => $schedule->class_name,
                 'status' => $status,
@@ -92,18 +114,27 @@ class Index extends Component
 
     public function render()
     {
-        $schedules = TeachingSchedule::with(['teacher', 'subject'])
-            ->where('day', $this->dayName)
-            ->orderBy('start_time')
-            ->get();
+        $schedules = collect();
+
+        if ($this->isAllowed && $this->picketInstitutionId) {
+            $schedules = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+                ->where('day', $this->dayName)
+                ->where('institution_id', $this->picketInstitutionId)
+                ->orderBy('start_time')
+                ->get();
+        }
 
         $attendances = SubjectAttendance::whereDate('teaching_date', now()->toDateString())
+            ->when($this->picketInstitutionId, fn ($query) =>
+                $query->where('institution_id', $this->picketInstitutionId)
+            )
             ->get()
             ->keyBy('teaching_schedule_id');
 
         return view('livewire.picket-subject-attendances.index', [
             'schedules' => $schedules,
             'attendances' => $attendances,
+            'picketSchedule' => $this->picketSchedule,
         ])->layout('layouts.app');
     }
 }

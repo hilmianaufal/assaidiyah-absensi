@@ -2,6 +2,7 @@
 
 namespace App\Livewire\PicketSchedules;
 
+use App\Models\Institution;
 use App\Models\Teacher;
 use App\Models\TeacherPicketSchedule;
 use Livewire\Component;
@@ -17,7 +18,7 @@ class Index extends Component
     public string $start_time = '07:00';
     public string $end_time = '12:00';
     public bool $is_active = true;
-
+    public string $institution_id = '';
     public bool $showModal = false;
     public ?int $editingId = null;
 
@@ -34,7 +35,7 @@ class Index extends Component
     public function edit(int $id): void
     {
         $schedule = TeacherPicketSchedule::findOrFail($id);
-
+        $this->institution_id = (string) $schedule->institution_id;
         $this->editingId = $schedule->id;
         $this->teacher_id = (string) $schedule->teacher_id;
         $this->day = $schedule->day;
@@ -47,7 +48,8 @@ class Index extends Component
 
     public function save(): void
     {
-        $data = $this->validate([
+             $data = $this->validate([
+            'institution_id' => ['required', 'exists:institutions,id'],
             'teacher_id' => ['required', 'exists:teachers,id'],
             'day' => ['required', 'string'],
             'start_time' => ['required'],
@@ -72,6 +74,7 @@ class Index extends Component
     private function resetForm(): void
     {
         $this->editingId = null;
+        $this->institution_id = '';
         $this->teacher_id = '';
         $this->day = '';
         $this->start_time = '07:00';
@@ -82,7 +85,10 @@ class Index extends Component
 
     public function render()
     {
-        $schedules = TeacherPicketSchedule::with('teacher')
+        $schedules = TeacherPicketSchedule::with([
+                        'teacher',
+                        'institution',
+                    ])
             ->when($this->search, fn ($query) =>
                 $query->whereHas('teacher', fn ($q) =>
                     $q->where('name', 'like', '%' . $this->search . '%')
@@ -95,6 +101,9 @@ class Index extends Component
             'schedules' => $schedules,
             'teachers' => Teacher::where('is_active', true)
                 ->where('is_picket_officer', true)
+                ->orderBy('name')
+                ->get(),
+                'institutions' => Institution::where('is_active', true)
                 ->orderBy('name')
                 ->get(),
         ])->layout('layouts.app');

@@ -27,6 +27,14 @@ class TeacherAndSubjectSeeder extends Seeder
             ]
         );
 
+    $smk = Institution::firstOrCreate(
+            ['code' => 'smk'],
+            [
+                'name' => 'SMK Assaidiyyah',
+                'is_active' => true,
+            ]
+        );
+
         $teachers = [
             'Drs.H. Maknun',
             'H. Umar Hamdan, M.Pd.I',
@@ -63,6 +71,7 @@ class TeacherAndSubjectSeeder extends Seeder
             $teacher->institutions()->syncWithoutDetaching([
                 $ma->id,
                 $mts->id,
+                $smk->id,
             ]);
         }
 
