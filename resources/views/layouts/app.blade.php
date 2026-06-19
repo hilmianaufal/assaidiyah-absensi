@@ -91,6 +91,14 @@
                 <a href="{{ route('subjects.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('subjects.index') ? 'bg-white/15' : '' }}">Mata Pelajaran</a>
                 <a href="{{ route('teaching-schedules.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('teaching-schedules.index') ? 'bg-white/15' : '' }}">Jadwal Mengajar</a>
                 <a href="{{ route('picket-schedules.index') }}" class="block px-4 py-2 rounded-xl hover:bg-white/10 {{ request()->routeIs('picket-schedules.index') ? 'bg-white/15' : '' }}">Jadwal Piket</a>
+                <a href="{{ route('dhuha-schedules.index') }}" class="flex items-center gap-3 px-4 py-2.5 rounded-2xl hover:bg-white/10 {{ request()->routeIs('dhuha-schedules.index') ? 'bg-white/15' : '' }}">
+                    <i data-lucide="sun" class="w-4 h-4"></i>
+                    Jadwal Dhuha
+                </a>
+                <a href="{{ route('dhuha-reports.index') }}" class="flex items-center gap-3 px-4 py-2.5 rounded-2xl hover:bg-white/10 {{ request()->routeIs('dhuha-reports.index') ? 'bg-white/15' : '' }}">
+                    <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+                    Laporan Dhuha
+                </a>
             </div>
         </div>
 
@@ -151,6 +159,13 @@
             <i data-lucide="book-open" class="w-5 h-5"></i>
             Jadwal Saya
         </a>
+
+        <a href="{{ route('teacher.dhuha-report') }}"
+        class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.dhuha-report') ? 'bg-white/15' : '' }}">
+            <i data-lucide="sun" class="w-5 h-5"></i>
+            Laporan Dhuha
+        </a>
+
         <a href="{{ route('teacher.profile') }}"
         class="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/10 {{ request()->routeIs('teacher.profile') ? 'bg-white/15' : '' }}">
             <i data-lucide="user-round" class="w-5 h-5"></i>
@@ -283,11 +298,18 @@
                     <i data-lucide="book-open" class="w-5 h-5"></i>
                     Jadwal
                 </a>
+
                 <a href="{{ route('teacher.profile') }}"
                 class="min-w-[58px] flex flex-col items-center gap-1 {{ request()->routeIs('teacher.profile') ? 'text-blue-600' : 'text-slate-500' }}">
                     <i data-lucide="user-round" class="w-5 h-5"></i>
                     Profil
                 </a>
+
+                <a href="{{ route('teacher.dhuha-report') }}"
+                    class="min-w-[70px] flex flex-col items-center gap-1 {{ request()->routeIs('teacher.dhuha-report') ? 'text-blue-600' : 'text-slate-500' }}">
+                        <i data-lucide="sun" class="w-5 h-5"></i>
+                        Dhuha
+                    </a>
                 @if(auth()->user()->teacher?->is_picket_officer)
                     <a href="{{ route('picket-reports.create') }}" class="min-w-[58px] flex flex-col items-center gap-1 {{ request()->routeIs('picket-reports.create') ? 'text-blue-600' : 'text-slate-500' }}">
                         <i data-lucide="clipboard-check" class="w-5 h-5"></i>

@@ -29,6 +29,18 @@ class Index extends Component
     public string $reference_number = '';
     public string $payment_note = '';
 
+    public array $selectedHonors = [];
+
+    public bool $showBulkPaymentModal = false;
+
+    public string $bulk_payment_date = '';
+
+    public string $bulk_payment_method = 'cash';
+
+    public string $bulk_reference_number = '';
+
+    public string $bulk_payment_note = '';
+
     public function mount(): void
     {
         $this->month = (int) now()->format('m');
@@ -186,4 +198,88 @@ class Index extends Component
             'totalAdditionalHonor' => (clone $summaryQuery)->sum('total_additional_honor'),
         ])->layout('layouts.app');
     }
+
+    public function openBulkPaymentModal(): void
+    {
+        if (count($this->selectedHonors) === 0) {
+            session()->flash(
+                'success',
+                'Pilih minimal satu rekap honor.'
+            );
+
+            return;
+        }
+
+        $this->bulk_payment_date = now()->toDateString();
+        $this->bulk_payment_method = 'cash';
+        $this->bulk_reference_number = '';
+        $this->bulk_payment_note = '';
+
+        $this->showBulkPaymentModal = true;
+    }
+
+    public function saveBulkPayment(): void
+{
+    foreach ($this->selectedHonors as $honorId) {
+
+        $honor = MonthlyHonor::with('payments')
+            ->find($honorId);
+
+        if (! $honor) {
+            continue;
+        }
+
+        $alreadyPaid = (int) $honor->payments()->sum('amount');
+
+        $remaining = max(
+            (int) $honor->grand_total - $alreadyPaid,
+            0
+        );
+
+        if ($remaining <= 0) {
+            continue;
+        }
+
+        HonorPayment::create([
+            'monthly_honor_id' => $honor->id,
+            'payment_date' => $this->bulk_payment_date,
+            'amount' => $remaining,
+            'payment_method' => $this->bulk_payment_method,
+            'reference_number' => $this->bulk_reference_number,
+            'note' => $this->bulk_payment_note,
+        ]);
+
+        $honor->update([
+            'payment_status' => 'paid',
+            'paid_at' => now(),
+        ]);
+    }
+
+    $this->selectedHonors = [];
+
+    $this->showBulkPaymentModal = false;
+
+    session()->flash(
+        'success',
+        'Pembayaran massal berhasil diproses.'
+    );
+}
+
+public function deleteRecap(): void
+{
+    $honors = MonthlyHonor::where('month', $this->month)
+        ->where('year', $this->year)
+        ->pluck('id');
+
+    HonorPayment::whereIn('monthly_honor_id', $honors)
+        ->delete();
+
+    MonthlyHonor::whereIn('id', $honors)
+        ->delete();
+
+    session()->flash(
+        'success',
+        'Rekap honor dan pembayaran berhasil dihapus.'
+    );
+}
 }

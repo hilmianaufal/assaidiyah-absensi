@@ -20,7 +20,23 @@
                         <i data-lucide="calculator" class="w-5 h-5"></i>
                         Generate Rekap
                     </button>
+                    <button
+                        wire:click="deleteRecap"
+                        wire:confirm="Yakin ingin menghapus seluruh rekap bulan ini?"
+                        class="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-red-600 text-white font-bold shadow">
 
+                        <i data-lucide="trash-2" class="w-5 h-5"></i>
+
+                        Hapus Rekap
+                    </button>
+                    <button
+                        wire:click="openBulkPaymentModal"
+                        class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-emerald-600 text-white font-bold shadow">
+
+                        <i data-lucide="wallet" class="w-5 h-5"></i>
+
+                        Bayar Massal
+                    </button>
                     <button wire:click="exportExcel"
                         class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-emerald-500 text-white font-bold shadow">
                         <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
@@ -152,7 +168,17 @@
                     $paidTotal = $honor->payments->sum('amount');
                     $remaining = max(($honor->grand_total ?? 0) - $paidTotal, 0);
                 @endphp
+                <div class="flex items-center gap-3 mb-3">
+                    <input
+                        type="checkbox"
+                        wire:model="selectedHonors"
+                        value="{{ $honor->id }}"
+                        class="rounded border-slate-300 text-blue-600">
 
+                    <span class="text-sm font-bold text-slate-500">
+                        Pilih untuk pembayaran massal
+                    </span>
+                </div>
                 <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                     <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
                         <div>

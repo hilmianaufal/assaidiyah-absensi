@@ -32,6 +32,12 @@ use App\Livewire\FinanceDashboard\Index as FinanceDashboardIndex;
 use App\Http\Controllers\InstitutionHonorReportPdfController;
 use App\Livewire\TransportSettings\Index as TransportSettingsIndex;
 use App\Livewire\TeacherPortal\Profile as TeacherProfile;
+use App\Livewire\DhuhaSchedules\Index as DhuhaSchedulesIndex;
+use App\Livewire\TeacherPortal\DhuhaReport as TeacherDhuhaReport;
+use App\Livewire\DhuhaReports\Index as DhuhaReportsIndex;
+
+
+
 Route::get('/', function () {
     return view('auth.login');
 });
@@ -90,6 +96,18 @@ Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [Insti
     Route::get('/teacher/profile', TeacherProfile::class)
         ->middleware(['auth'])
         ->name('teacher.profile');
+
+    Route::get('/teacher/dhuha-report', TeacherDhuhaReport::class)
+        ->middleware(['auth'])
+        ->name('teacher.dhuha-report');
+
+    Route::get('/dhuha-schedules', DhuhaSchedulesIndex::class)
+    ->middleware(['auth'])
+    ->name('dhuha-schedules.index');
+
+Route::get('/dhuha-reports', DhuhaReportsIndex::class)
+    ->middleware(['auth'])
+    ->name('dhuha-reports.index');
 
         Route::get('/transport-settings', TransportSettingsIndex::class)
     ->middleware(['auth'])
