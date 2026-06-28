@@ -152,7 +152,14 @@ class Index extends Component
         ]);
 
         $this->addLog($teacher->name, 'Pulang', $now->format('H:i:s'), $transportAmount);
-
+        if ($transportAmount > 0) {
+                \App\Models\AppNotification::create([
+                    'teacher_id' => $teacher->id,
+                    'title' => 'Transport diterima',
+                    'message' => 'Anda mendapatkan transport sebesar Rp ' . number_format($transportAmount, 0, ',', '.') . ' hari ini.',
+                    'type' => 'success',
+                ]);
+            }
         return [
             'status' => 'success',
             'type' => 'check_out',
