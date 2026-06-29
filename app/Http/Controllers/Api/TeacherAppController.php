@@ -644,4 +644,28 @@ public function markNotificationAsRead(Request $request, AppNotification $notifi
     ]);
 }
 
+public function schedules(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    if (! $teacher) {
+        return response()->json([
+            'message' => 'Data guru tidak ditemukan.'
+        ], 404);
+    }
+
+    $schedules = TeachingSchedule::with([
+        'subject',
+        'institution',
+    ])
+    ->where('teacher_id', $teacher->id)
+    ->orderBy('day')
+    ->orderBy('start_time')
+    ->get();
+
+    return response()->json([
+        'schedules' => $schedules,
+    ]);
+}
+
 }
