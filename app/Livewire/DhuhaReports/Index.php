@@ -34,5 +34,5 @@ class Index extends Component
                 ->orderBy('name')
                 ->get(),
         ])->layout('layouts.app');
-    }
+    }/*  */
 }
