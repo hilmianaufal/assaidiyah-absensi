@@ -206,4 +206,53 @@ class Index extends Component
             'picketSchedule' => $this->picketSchedule,
         ])->layout('layouts.app');
     }
+
+    public function markAttendance(int $scheduleId, string $status): void
+{
+    $teacher = auth()->user()->teacher;
+
+    $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+        ->where('institution_id', $this->picketInstitutionId)
+        ->findOrFail($scheduleId);
+
+    $isPaid = in_array($status, ['present', 'late']);
+
+    $package = TeacherHonorPackage::where('teacher_id', $schedule->teacher_id)
+        ->where('institution_id', $schedule->institution_id)
+        ->where('is_active', true)
+        ->first();
+
+    $ratePerHour = $package?->hourly_rate ?? 0;
+
+    $teachingHonor = $isPaid
+        ? ($schedule->hours_count * $ratePerHour)
+        : 0;
+
+    SubjectAttendance::updateOrCreate(
+        [
+            'teacher_id' => $schedule->teacher_id,
+            'subject_id' => $schedule->subject_id,
+            'teaching_schedule_id' => $schedule->id,
+            'teaching_date' => now()->toDateString(),
+        ],
+        [
+            'institution_id' => $schedule->institution_id,
+            'recorded_by_teacher_id' => $teacher->id,
+            'source' => 'picket',
+            'attendance_status' => $status,
+            'recorded_at' => now(),
+
+            'start_time' => $schedule->start_time,
+            'end_time' => $schedule->end_time,
+            'hours_count' => $schedule->hours_count,
+            'hourly_rate' => $ratePerHour,
+            'teaching_honor' => $teachingHonor,
+            'class_name' => $schedule->class_name,
+            'status' => $status,
+            'note' => 'Dicatat oleh guru piket: '.$teacher->name,
+        ]
+    );
+
+    session()->flash('success', 'Absensi berhasil disimpan.');
+}
 }
