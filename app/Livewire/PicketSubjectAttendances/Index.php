@@ -222,7 +222,7 @@ class Index extends Component
         ->where('is_active', true)
         ->first();
 
-    $ratePerHour = $package?->hourly_rate ?? 0;
+    $ratePerHour = $package?->deduction_per_hour ?? 0;
 
     $teachingHonor = $isPaid
         ? ($schedule->hours_count * $ratePerHour)
