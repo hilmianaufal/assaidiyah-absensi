@@ -153,13 +153,13 @@ class Index extends Component
 
         $this->addLog($teacher->name, 'Pulang', $now->format('H:i:s'), $transportAmount);
         if ($transportAmount > 0) {
-                \App\Models\AppNotification::create([
-                    'teacher_id' => $teacher->id,
-                    'title' => 'Transport diterima',
-                    'message' => 'Anda mendapatkan transport sebesar Rp ' . number_format($transportAmount, 0, ',', '.') . ' hari ini.',
-                    'type' => 'success',
-                ]);
-            }
+            \App\Models\AppNotification::create([
+                'teacher_id' => $teacher->id,
+                'title' => 'Transport diterima',
+                'message' => 'Anda mendapatkan transport sebesar Rp ' . number_format($transportAmount, 0, ',', '.') . ' hari ini.',
+                'type' => 'success',
+            ]);
+        }
         return [
             'status' => 'success',
             'type' => 'check_out',
@@ -184,7 +184,7 @@ class Index extends Component
     public function render()
     {
 
-     return view('livewire.face-attendance.index', [
+        return view('livewire.face-attendance.index', [
             'teachers' => Teacher::where('is_active', true)
                 ->whereNotNull('face_descriptor')
                 ->orderBy('name')
@@ -206,5 +206,14 @@ class Index extends Component
         Storage::disk('public')->put($fileName, base64_decode($image));
 
         return $fileName;
+    }
+
+    public function mount(): void
+    {
+        $requestedMode = request()->query('mode', 'check_in');
+
+        if (in_array($requestedMode, ['check_in', 'check_out'], true)) {
+            $this->mode = $requestedMode;
+        }
     }
 }

@@ -4,14 +4,19 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DailyAttendancePdfController;
 use App\Http\Controllers\HonorPaymentReceiptController;
 use App\Http\Controllers\HonorPdfController;
+use App\Http\Controllers\InstitutionHonorReportPdfController;
+use App\Http\Controllers\MobileAdminSessionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SubjectAttendancePdfController;
 use App\Http\Controllers\TeacherHonorPdfController;
 use App\Livewire\AdditionalHonors\Index as AdditionalHonorsIndex;
 use App\Livewire\DailyAttendances\Index as DailyAttendancesIndex;
 use App\Livewire\Dashboard\Index as DashboardIndex;
+use App\Livewire\DhuhaReports\Index as DhuhaReportsIndex;
+use App\Livewire\DhuhaSchedules\Index as DhuhaSchedulesIndex;
 use App\Livewire\FaceAttendance\Index as FaceAttendanceIndex;
 use App\Livewire\FaceEnrollment\Index as FaceEnrollmentIndex;
+use App\Livewire\FinanceDashboard\Index as FinanceDashboardIndex;
 use App\Livewire\Kiosk\Index as KioskIndex;
 use App\Livewire\MonthlyHonors\Index as MonthlyHonorsIndex;
 use App\Livewire\PicketReports\Create as PicketReportCreate;
@@ -22,19 +27,15 @@ use App\Livewire\Subjects\Index as SubjectsIndex;
 use App\Livewire\TeacherHonorPackages\Index as TeacherHonorPackagesIndex;
 use App\Livewire\TeacherPortal\Attendances as TeacherAttendances;
 use App\Livewire\TeacherPortal\Dashboard as TeacherDashboard;
+use App\Livewire\TeacherPortal\DhuhaReport as TeacherDhuhaReport;
 use App\Livewire\TeacherPortal\Honors as TeacherHonors;
+use App\Livewire\TeacherPortal\Profile as TeacherProfile;
 use App\Livewire\TeacherPortal\Schedules as TeacherSchedules;
 use App\Livewire\Teachers\Index as TeachersIndex;
 use App\Livewire\TeachingSchedules\Index as TeachingSchedulesIndex;
+use App\Livewire\TransportSettings\Index as TransportSettingsIndex;
 use App\Livewire\Users\Index as UsersIndex;
 use Illuminate\Support\Facades\Route;
-use App\Livewire\FinanceDashboard\Index as FinanceDashboardIndex;
-use App\Http\Controllers\InstitutionHonorReportPdfController;
-use App\Livewire\TransportSettings\Index as TransportSettingsIndex;
-use App\Livewire\TeacherPortal\Profile as TeacherProfile;
-use App\Livewire\DhuhaSchedules\Index as DhuhaSchedulesIndex;
-use App\Livewire\TeacherPortal\DhuhaReport as TeacherDhuhaReport;
-use App\Livewire\DhuhaReports\Index as DhuhaReportsIndex;
 
 
 
@@ -45,23 +46,28 @@ Route::get('/', function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard', DashboardIndex::class)->name('dashboard');
     Route::get('/finance-dashboard', FinanceDashboardIndex::class)
-    ->name('finance-dashboard.index');
+        ->name('finance-dashboard.index');
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
-Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [InstitutionHonorReportPdfController::class, 'show'])
-    ->name('honor-reports.institution.pdf');
+    Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [InstitutionHonorReportPdfController::class, 'show'])
+        ->name('honor-reports.institution.pdf');
 
     Route::get('/teachers', TeachersIndex::class)->name('teachers.index');
     Route::get('/subjects', SubjectsIndex::class)->name('subjects.index');
     Route::get('/users', UsersIndex::class)->name('users.index');
 
-    Route::get('/face-attendance', FaceAttendanceIndex::class)->name('face-attendance.index');
-    Route::get('/face-enrollment', FaceEnrollmentIndex::class)->name('face-enrollment.index');
+    Route::get('/face-attendance', FaceAttendanceIndex::class)
+        ->middleware('can:admin-only')
+        ->name('face-attendance.index');
+
+    Route::get('/face-enrollment', FaceEnrollmentIndex::class)
+        ->middleware('can:admin-only')
+        ->name('face-enrollment.index');
     Route::get('/kiosk', KioskIndex::class)
-    ->middleware(['auth', 'can:admin-only'])
-    ->name('kiosk.index');
+        ->middleware(['auth', 'can:admin-only'])
+        ->name('kiosk.index');
 
     Route::get('/teaching-schedules', TeachingSchedulesIndex::class)->name('teaching-schedules.index');
     Route::get('/picket-schedules', PicketSchedulesIndex::class)->name('picket-schedules.index');
@@ -82,16 +88,16 @@ Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [Insti
 
     Route::get('/monthly-honors/{honor}/pdf', [HonorPdfController::class, 'show'])->name('monthly-honors.pdf');
     Route::get('/teacher/honors/{honor}/pdf', [TeacherHonorPdfController::class, 'downloadByHonor'])
-    ->name('teacher.honors.pdf-by-honor');
+        ->name('teacher.honors.pdf-by-honor');
     Route::get('/teacher/honors/pdf/{month}/{year}', [TeacherHonorPdfController::class, 'download'])->name('teacher.honors.pdf');
     Route::get('/subject-attendances/pdf/{date}', [SubjectAttendancePdfController::class, 'show'])->name('subject-attendances.pdf');
     Route::get('/daily-attendances/pdf/{date}', [DailyAttendancePdfController::class, 'show'])->name('daily-attendances.pdf');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/teacher-honor-packages', TeacherHonorPackagesIndex::class)
-    ->name('teacher-honor-packages.index');
+        ->name('teacher-honor-packages.index');
     Route::get('/honor-payments/{payment}/receipt', [HonorPaymentReceiptController::class, 'show'])
-    ->name('honor-payments.receipt');
+        ->name('honor-payments.receipt');
 
     Route::get('/teacher/profile', TeacherProfile::class)
         ->middleware(['auth'])
@@ -102,16 +108,22 @@ Route::get('/honor-reports/institution/pdf/{institution}/{month}/{year}', [Insti
         ->name('teacher.dhuha-report');
 
     Route::get('/dhuha-schedules', DhuhaSchedulesIndex::class)
-    ->middleware(['auth'])
-    ->name('dhuha-schedules.index');
+        ->middleware(['auth'])
+        ->name('dhuha-schedules.index');
 
-Route::get('/dhuha-reports', DhuhaReportsIndex::class)
-    ->middleware(['auth'])
-    ->name('dhuha-reports.index');
+    Route::get('/dhuha-reports', DhuhaReportsIndex::class)
+        ->middleware(['auth'])
+        ->name('dhuha-reports.index');
 
-        Route::get('/transport-settings', TransportSettingsIndex::class)
-    ->middleware(['auth'])
-    ->name('transport-settings.index');
+    Route::get('/transport-settings', TransportSettingsIndex::class)
+        ->middleware(['auth'])
+        ->name('transport-settings.index');
+
+    Route::get(
+        '/mobile/admin/session/{token}',
+        MobileAdminSessionController::class
+    )->name('mobile.admin.session');
+
 });
 
-require __DIR__.'/auth.php';
+require __DIR__ . '/auth.php';

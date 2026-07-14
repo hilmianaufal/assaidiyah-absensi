@@ -12,7 +12,7 @@ class AdminUserSeeder extends Seeder
     {
         User::updateOrCreate(
             [
-                'email' => 'admin@assaidiyyah.com',
+                'email' => 'admin@gmail.com',
             ],
             [
                 'name' => 'Administrator',
