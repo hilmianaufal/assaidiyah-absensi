@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -14,34 +15,45 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $data = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required'],
+            'email' => [
+                'required',
+                'email',
+            ],
+            'password' => [
+                'required',
+                'string',
+            ],
         ]);
 
-        if (! Auth::attempt($data)) {
+        $user = User::with('teacher')
+            ->where('email', $data['email'])
+            ->first();
+
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json([
                 'message' => 'Email atau password salah.',
             ], 401);
         }
 
-        $user = $request->user();
-        $user->load('teacher');
-
         if (! in_array($user->role, ['admin', 'guru'], true)) {
-            Auth::logout();
-
             return response()->json([
                 'message' => 'Role akun tidak diizinkan menggunakan aplikasi.',
             ], 403);
         }
 
         if ($user->role === 'guru' && ! $user->teacher) {
-            Auth::logout();
-
             return response()->json([
                 'message' => 'Akun guru belum terhubung dengan data guru.',
             ], 403);
         }
+
+        /*
+         * Hapus token Android lama milik user supaya token
+         * tidak terus bertambah setiap kali login.
+         */
+        $user->tokens()
+            ->where('name', 'android-app')
+            ->delete();
 
         $token = $user
             ->createToken('android-app')
@@ -93,20 +105,28 @@ class AuthController extends Controller
             'enrollment' => '/face-enrollment?mobile=1',
         };
 
-        $token = Str::random(64);
+        $sessionToken = Str::random(64);
 
         Cache::put(
-            'mobile_admin_session:' . $token,
+            'mobile_admin_session:' . $sessionToken,
             [
                 'user_id' => $user->id,
                 'path' => $path,
             ],
-            now()->addMinutes(2)
+            now()->addMinutes(5)
+        );
+
+        $baseUrl = rtrim(
+            config('app.url'),
+            '/'
         );
 
         return response()->json([
-            'url' => url('/mobile/admin/session/' . $token),
-            'expires_in' => 120,
+            'url' => $baseUrl
+                . '/mobile/admin/session/'
+                . $sessionToken,
+
+            'expires_in' => 300,
         ]);
     }
 

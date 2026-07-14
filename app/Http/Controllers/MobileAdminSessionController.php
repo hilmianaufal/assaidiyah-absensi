@@ -9,32 +9,52 @@ use Illuminate\Support\Facades\Cache;
 
 class MobileAdminSessionController extends Controller
 {
-    public function __invoke(Request $request, string $token)
-    {
+    public function __invoke(
+        Request $request,
+        string $token
+    ) {
         $cacheKey = 'mobile_admin_session:' . $token;
 
-        // Cache::pull membuat token hanya bisa dipakai satu kali.
+        /*
+         * Cache::pull mengambil sekaligus menghapus token.
+         * Artinya link hanya bisa dipakai satu kali.
+         */
         $payload = Cache::pull($cacheKey);
 
-        abort_unless(
-            is_array($payload) &&
-            isset($payload['user_id'], $payload['path']),
-            403,
-            'Link login admin sudah kedaluwarsa atau telah digunakan.'
-        );
+        if (
+            ! is_array($payload) ||
+            ! isset($payload['user_id'], $payload['path'])
+        ) {
+            abort(
+                403,
+                'Link admin sudah kedaluwarsa atau sudah digunakan.'
+            );
+        }
 
         $user = User::find($payload['user_id']);
 
-        abort_unless(
-            $user && $user->role === 'admin',
-            403,
-            'Akun tidak memiliki akses admin.'
+        if (! $user || $user->role !== 'admin') {
+            abort(
+                403,
+                'Akun tidak memiliki akses admin.'
+            );
+        }
+
+        /*
+         * Membuat sesi login web Laravel.
+         */
+        Auth::guard('web')->login(
+            $user,
+            false
         );
 
-        Auth::guard('web')->login($user);
-
+        /*
+         * Mengganti session ID untuk keamanan.
+         */
         $request->session()->regenerate();
 
-        return redirect()->to($payload['path']);
+        return redirect()->to(
+            $payload['path']
+        );
     }
 }
