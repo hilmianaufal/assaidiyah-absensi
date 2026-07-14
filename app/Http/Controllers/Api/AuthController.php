@@ -5,9 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
@@ -15,14 +14,8 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $data = $request->validate([
-            'email' => [
-                'required',
-                'email',
-            ],
-            'password' => [
-                'required',
-                'string',
-            ],
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
         ]);
 
         $user = User::with('teacher')
@@ -47,10 +40,6 @@ class AuthController extends Controller
             ], 403);
         }
 
-        /*
-         * Hapus token Android lama milik user supaya token
-         * tidak terus bertambah setiap kali login.
-         */
         $user->tokens()
             ->where('name', 'android-app')
             ->delete();
@@ -82,7 +71,7 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
-        if (! $user || $user->role !== 'admin') {
+        if (! $user || strtolower((string) $user->role) !== 'admin') {
             return response()->json([
                 'message' => 'Menu ini hanya dapat dibuka oleh admin.',
             ], 403);
@@ -99,34 +88,26 @@ class AuthController extends Controller
             ],
         ]);
 
-        $path = match ($data['target']) {
-            'check_in' => '/face-attendance?mode=check_in&mobile=1',
-            'check_out' => '/face-attendance?mode=check_out&mobile=1',
-            'enrollment' => '/face-enrollment?mobile=1',
-        };
-
-        $sessionToken = Str::random(64);
-
-        Cache::put(
-            'mobile_admin_session:' . $sessionToken,
+        /*
+         * Gunakan signed URL relatif agar tidak bermasalah
+         * dengan HTTPS Cloudflare, Docker, atau reverse proxy.
+         */
+        $relativeUrl = URL::temporarySignedRoute(
+            'mobile.admin.session',
+            now()->addMinutes(10),
             [
-                'user_id' => $user->id,
-                'path' => $path,
+                'user' => $user->id,
+                'target' => $data['target'],
             ],
-            now()->addMinutes(5)
+            false
         );
 
-        $baseUrl = rtrim(
-            config('app.url'),
-            '/'
-        );
+        $fullUrl = rtrim((string) config('app.url'), '/')
+            . $relativeUrl;
 
         return response()->json([
-            'url' => $baseUrl
-                . '/mobile/admin/session/'
-                . $sessionToken,
-
-            'expires_in' => 300,
+            'url' => $fullUrl,
+            'expires_in' => 600,
         ]);
     }
 

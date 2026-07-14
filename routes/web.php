@@ -51,22 +51,25 @@ Route::get('/', function () {
 
 /*
 |--------------------------------------------------------------------------
-| Jembatan Login Admin Android
+| Jembatan Sesi Admin Android
 |--------------------------------------------------------------------------
 |
-| Route ini harus berada di luar middleware auth karena route inilah
-| yang menerima token sekali pakai dan membuat sesi login web Laravel.
+| Route ini harus berada di luar middleware auth.
+| Flutter membuka signed URL ini, kemudian controller membuat sesi login
+| web Laravel dan mengarahkan admin ke halaman scan atau registrasi wajah.
 |
 */
 
 Route::get(
-    '/mobile/admin/session/{token}',
+    '/mobile/admin/session',
     MobileAdminSessionController::class
-)->name('mobile.admin.session');
+)
+    ->middleware('signed:relative')
+    ->name('mobile.admin.session');
 
 /*
 |--------------------------------------------------------------------------
-| Route Yang Membutuhkan Login
+| Route yang Membutuhkan Login Web
 |--------------------------------------------------------------------------
 */
 
@@ -74,7 +77,7 @@ Route::middleware(['auth'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Dashboard dan Profil Admin
+    | Dashboard
     |--------------------------------------------------------------------------
     */
 
@@ -83,6 +86,12 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/finance-dashboard', FinanceDashboardIndex::class)
         ->name('finance-dashboard.index');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Profil
+    |--------------------------------------------------------------------------
+    */
 
     Route::get('/profile', [ProfileController::class, 'edit'])
         ->name('profile.edit');
@@ -140,7 +149,7 @@ Route::middleware(['auth'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Absensi
+    | Absensi Harian dan Mengajar
     |--------------------------------------------------------------------------
     */
 
@@ -154,6 +163,12 @@ Route::middleware(['auth'])->group(function () {
         '/picket-subject-attendances',
         PicketSubjectAttendancesIndex::class
     )->name('picket-subject-attendances.index');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Laporan Piket
+    |--------------------------------------------------------------------------
+    */
 
     Route::get('/picket-reports/create', PicketReportCreate::class)
         ->name('picket-reports.create');
@@ -208,7 +223,7 @@ Route::middleware(['auth'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Laporan PDF
+    | Laporan dan PDF
     |--------------------------------------------------------------------------
     */
 

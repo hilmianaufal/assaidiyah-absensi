@@ -5,44 +5,54 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 
 class MobileAdminSessionController extends Controller
 {
-    public function __invoke(Request $request, string $token)
+    public function __invoke(Request $request)
     {
-        $cacheKey = 'mobile_admin_session:' . $token;
+        $target = (string) $request->query('target');
+        $userId = (int) $request->query('user');
 
-        $payload = Cache::pull($cacheKey);
+        if (! in_array(
+            $target,
+            ['check_in', 'check_out', 'enrollment'],
+            true
+        )) {
+            abort(403, 'Target halaman admin tidak valid.');
+        }
+
+        $user = User::find($userId);
 
         if (
-            ! is_array($payload) ||
-            ! isset($payload['user_id'], $payload['path'])
+            ! $user ||
+            strtolower((string) $user->role) !== 'admin'
         ) {
-            abort(
-                403,
-                'Link admin sudah kedaluwarsa atau sudah digunakan.'
-            );
+            abort(403, 'Akun tidak memiliki akses admin.');
         }
 
-        $user = User::find($payload['user_id']);
-
-        if (! $user || $user->role !== 'admin') {
-            abort(
-                403,
-                'Akun tidak memiliki akses admin.'
-            );
-        }
-
+        /*
+         * Membuat sesi login web Laravel untuk WebView.
+         */
         Auth::guard('web')->login($user);
 
         $request->session()->regenerate();
 
-        $baseUrl = rtrim((string) config('app.url'), '/');
-        $targetPath = '/' . ltrim($payload['path'], '/');
+        $path = match ($target) {
+            'check_in' =>
+                '/face-attendance?mode=check_in&mobile=1',
 
-        $targetUrl = $baseUrl . $targetPath;
+            'check_out' =>
+                '/face-attendance?mode=check_out&mobile=1',
 
-        return redirect()->away($targetUrl);
+            'enrollment' =>
+                '/face-enrollment?mobile=1',
+        };
+
+        $destination = rtrim(
+            (string) config('app.url'),
+            '/'
+        ) . $path;
+
+        return redirect()->away($destination);
     }
 }
