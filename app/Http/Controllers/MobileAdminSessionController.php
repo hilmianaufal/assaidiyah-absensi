@@ -9,16 +9,10 @@ use Illuminate\Support\Facades\Cache;
 
 class MobileAdminSessionController extends Controller
 {
-    public function __invoke(
-        Request $request,
-        string $token
-    ) {
+    public function __invoke(Request $request, string $token)
+    {
         $cacheKey = 'mobile_admin_session:' . $token;
 
-        /*
-         * Cache::pull mengambil sekaligus menghapus token.
-         * Artinya link hanya bisa dipakai satu kali.
-         */
         $payload = Cache::pull($cacheKey);
 
         if (
@@ -40,21 +34,15 @@ class MobileAdminSessionController extends Controller
             );
         }
 
-        /*
-         * Membuat sesi login web Laravel.
-         */
-        Auth::guard('web')->login(
-            $user,
-            false
-        );
+        Auth::guard('web')->login($user);
 
-        /*
-         * Mengganti session ID untuk keamanan.
-         */
         $request->session()->regenerate();
 
-        return redirect()->to(
-            $payload['path']
-        );
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        $targetPath = '/' . ltrim($payload['path'], '/');
+
+        $targetUrl = $baseUrl . $targetPath;
+
+        return redirect()->away($targetUrl);
     }
 }
