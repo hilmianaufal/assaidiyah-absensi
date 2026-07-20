@@ -5,7 +5,6 @@ namespace App\Livewire\DailyAttendances;
 use App\Exports\DailyAttendancesExport;
 use App\Models\DailyAttendance;
 use App\Models\Teacher;
-use App\Models\TransportSetting;
 use App\Services\TeacherAttendanceService;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -138,10 +137,6 @@ class Index extends Component
                     ->where('is_active', true)
                     ->orderBy('name')
                     ->get(),
-                'transportSetting' => TransportSetting::query()
-                    ->where('is_active', true)
-                    ->latest('id')
-                    ->first(),
             ]
         )->layout('layouts.app');
     }

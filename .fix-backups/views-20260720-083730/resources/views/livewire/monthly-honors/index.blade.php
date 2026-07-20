@@ -52,12 +52,6 @@
             </div>
         @endif
 
-        @if (session('error'))
-            <div class="rounded-2xl bg-red-100 text-red-700 p-4 font-bold">
-                {{ session('error') }}
-            </div>
-        @endif
-
         <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-8 gap-4">
             <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                 <p class="text-sm text-slate-500">Honor Paket</p>
@@ -410,111 +404,6 @@
                         <button type="submit"
                             class="flex-1 px-5 py-3 rounded-2xl bg-emerald-600 text-white font-black shadow">
                             Simpan Pembayaran
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    @endif
-
-    @if ($showBulkPaymentModal)
-        <div class="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 backdrop-blur-sm sm:items-center">
-            <div class="w-full max-w-lg rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
-                <div class="mb-5 flex items-start justify-between gap-4">
-                    <div>
-                        <p class="text-sm font-bold text-emerald-600">Pembayaran Massal</p>
-                        <h3 class="text-xl font-black text-slate-900">Bayar Honor Terpilih</h3>
-                        <p class="mt-1 text-sm text-slate-500">
-                            {{ count($selectedHonors) }} rekap dipilih. Sistem membayar seluruh sisa honor masing-masing guru.
-                        </p>
-                    </div>
-
-                    <button
-                        type="button"
-                        wire:click="$set('showBulkPaymentModal', false)"
-                        class="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600"
-                    >
-                        <i data-lucide="x" class="h-5 w-5"></i>
-                    </button>
-                </div>
-
-                <form wire:submit="saveBulkPayment" class="space-y-4">
-                    <div>
-                        <label class="text-sm font-bold text-slate-700">Tanggal Bayar</label>
-                        <input
-                            wire:model="bulk_payment_date"
-                            type="date"
-                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-emerald-500 focus:ring-emerald-500"
-                        >
-                        @error('bulk_payment_date')
-                            <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                        @enderror
-                    </div>
-
-                    <div>
-                        <label class="text-sm font-bold text-slate-700">Metode Pembayaran</label>
-                        <select
-                            wire:model="bulk_payment_method"
-                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-emerald-500 focus:ring-emerald-500"
-                        >
-                            <option value="cash">Cash</option>
-                            <option value="transfer">Transfer</option>
-                            <option value="qris">QRIS</option>
-                        </select>
-                        @error('bulk_payment_method')
-                            <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                        @enderror
-                    </div>
-
-                    <div>
-                        <label class="text-sm font-bold text-slate-700">Nomor Referensi</label>
-                        <input
-                            wire:model="bulk_reference_number"
-                            type="text"
-                            placeholder="Opsional"
-                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-emerald-500 focus:ring-emerald-500"
-                        >
-                        @error('bulk_reference_number')
-                            <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                        @enderror
-                    </div>
-
-                    <div>
-                        <label class="text-sm font-bold text-slate-700">Catatan</label>
-                        <textarea
-                            wire:model="bulk_payment_note"
-                            rows="3"
-                            placeholder="Opsional"
-                            class="mt-1 w-full rounded-2xl border-slate-200 focus:border-emerald-500 focus:ring-emerald-500"
-                        ></textarea>
-                        @error('bulk_payment_note')
-                            <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                        @enderror
-                    </div>
-
-                    @error('selectedHonors')
-                        <div class="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">
-                            {{ $message }}
-                        </div>
-                    @enderror
-
-                    <div class="flex gap-3 pt-2">
-                        <button
-                            type="button"
-                            wire:click="$set('showBulkPaymentModal', false)"
-                            class="flex-1 rounded-2xl bg-slate-100 px-5 py-3 font-black text-slate-700"
-                        >
-                            Batal
-                        </button>
-
-                        <button
-                            type="submit"
-                            wire:loading.attr="disabled"
-                            wire:target="saveBulkPayment"
-                            class="flex-1 rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white shadow disabled:opacity-50"
-                        >
-                            <span wire:loading.remove wire:target="saveBulkPayment">Bayar Sekarang</span>
-                            <span wire:loading wire:target="saveBulkPayment">Memproses...</span>
                         </button>
                     </div>
                 </form>

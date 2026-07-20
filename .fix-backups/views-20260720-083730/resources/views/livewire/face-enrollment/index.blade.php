@@ -92,19 +92,12 @@
                 </form>
             </div>
         </section>
-
-        @if (session('success'))
-            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 font-bold text-emerald-700">
-                {{ session('success') }}
-            </div>
-        @endif
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <script>
         let enrollVideo = null;
-        let enrollStream = null;
         let enrollModelsLoaded = false;
         let captureCooldown = false;
 
@@ -121,12 +114,10 @@
             window.speechSynthesis.speak(speech);
         }
 
-        document.addEventListener('change', function (event) {
-            if (event.target.id !== 'teacherSelect') return;
+        document.addEventListener('change', function (e) {
+            if (e.target.id !== 'teacherSelect') return;
 
-            const selected = event.target.options[
-                event.target.selectedIndex
-            ]?.text || 'Pilih guru terlebih dahulu';
+            const selected = e.target.options[e.target.selectedIndex]?.text || 'Pilih guru terlebih dahulu';
 
             document.getElementById('teacherOverlay').innerText = selected;
         });
@@ -134,40 +125,23 @@
         async function loadFaceModels() {
             if (enrollModelsLoaded) return;
 
-            document.getElementById('faceStatus').innerText =
-                'Memuat model wajah...';
+            document.getElementById('faceStatus').innerText = 'Memuat model wajah...';
 
             await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
             await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
             await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
 
             enrollModelsLoaded = true;
-            document.getElementById('faceStatus').innerText =
-                'Model wajah siap';
-        }
-
-        function stopEnrollCamera() {
-            if (enrollStream) {
-                enrollStream.getTracks().forEach((track) => track.stop());
-                enrollStream = null;
-            }
-
-            if (enrollVideo?.srcObject) {
-                enrollVideo.srcObject
-                    .getTracks()
-                    .forEach((track) => track.stop());
-                enrollVideo.srcObject = null;
-            }
+            document.getElementById('faceStatus').innerText = 'Model wajah siap';
         }
 
         async function startEnrollCamera() {
             enrollVideo = document.getElementById('enrollCamera');
 
             try {
-                stopEnrollCamera();
                 await loadFaceModels();
 
-                enrollStream = await navigator.mediaDevices.getUserMedia({
+                const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: 'user',
                         width: { ideal: 1280 },
@@ -176,13 +150,10 @@
                     audio: false
                 });
 
-                enrollVideo.srcObject = enrollStream;
-                await enrollVideo.play();
+                enrollVideo.srcObject = stream;
 
-                document.getElementById('faceStatus').innerText =
-                    'Kamera aktif';
-                document.getElementById('cameraHint').innerText =
-                    'Silakan ambil data wajah guru.';
+                document.getElementById('faceStatus').innerText = 'Kamera aktif';
+                document.getElementById('cameraHint').innerText = 'Silakan ambil data wajah guru.';
 
                 speakAI('Kamera aktif. Silakan ambil data wajah.');
 
@@ -193,11 +164,7 @@
                     showConfirmButton: false
                 });
             } catch (error) {
-                console.error('ENROLL CAMERA ERROR:', error);
-                stopEnrollCamera();
-
-                document.getElementById('faceStatus').innerText =
-                    'Kamera gagal aktif';
+                console.error(error);
 
                 Swal.fire({
                     icon: 'error',
@@ -210,11 +177,12 @@
         async function captureFaceDescriptor() {
             if (captureCooldown) return;
 
-            if (
-                !enrollVideo ||
-                !enrollVideo.srcObject ||
-                enrollVideo.readyState !== 4
-            ) {
+            captureCooldown = true;
+            setTimeout(() => {
+                captureCooldown = false;
+            }, 1000);
+
+            if (!enrollVideo) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Kamera belum aktif',
@@ -224,93 +192,63 @@
             }
 
             const teacherSelect = document.getElementById('teacherSelect');
-
             if (!teacherSelect.value) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Pilih guru dulu',
-                    text: 'Nama guru wajib dipilih sebelum mengambil data wajah.'
+                    text: 'Nama guru wajib dipilih sebelum ambil data wajah.'
                 });
                 return;
             }
 
-            captureCooldown = true;
+            document.getElementById('faceStatus').innerText = 'AI sedang mendeteksi wajah...';
+            document.getElementById('cameraHint').innerText = 'AI sedang membaca pola wajah.';
 
-            try {
-                document.getElementById('faceStatus').innerText =
-                    'AI sedang mendeteksi wajah...';
-                document.getElementById('cameraHint').innerText =
-                    'AI sedang membaca pola wajah.';
+            const detection = await faceapi
+                .detectSingleFace(enrollVideo, new faceapi.TinyFaceDetectorOptions({
+                    inputSize: 416,
+                    scoreThreshold: 0.6
+                }))
+                .withFaceLandmarks()
+                .withFaceDescriptor();
 
-                const detection = await faceapi
-                    .detectSingleFace(
-                        enrollVideo,
-                        new faceapi.TinyFaceDetectorOptions({
-                            inputSize: 416,
-                            scoreThreshold: 0.6
-                        })
-                    )
-                    .withFaceLandmarks()
-                    .withFaceDescriptor();
+            if (!detection) {
+                document.getElementById('faceStatus').innerText = 'Wajah tidak terdeteksi';
+                document.getElementById('cameraHint').innerText = 'Pastikan wajah terang dan menghadap kamera.';
 
-                if (!detection) {
-                    document.getElementById('faceStatus').innerText =
-                        'Wajah tidak terdeteksi';
-                    document.getElementById('cameraHint').innerText =
-                        'Pastikan wajah terang dan menghadap kamera.';
-
-                    speakAI('Wajah tidak terdeteksi. Silakan coba lagi.');
-
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Wajah tidak terdeteksi',
-                        text: 'Pastikan wajah jelas, terang, dan menghadap depan.'
-                    });
-                    return;
-                }
-
-                const descriptor = Array.from(detection.descriptor);
-                @this.set('descriptor', JSON.stringify(descriptor));
-
-                const teacherName = teacherSelect.options[
-                    teacherSelect.selectedIndex
-                ].text
-                    .replace('(Sudah Terdaftar)', '')
-                    .replace('(Belum)', '')
-                    .trim();
-
-                document.getElementById('teacherOverlay').innerText =
-                    'Terdeteksi: ' + teacherName;
-                document.getElementById('faceStatus').innerText =
-                    'Data wajah berhasil diambil';
-                document.getElementById('cameraHint').innerText =
-                    'Klik Simpan Data Wajah untuk menyimpan.';
-
-                speakAI('Data wajah ' + teacherName + ' berhasil direkam.');
-
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Wajah berhasil direkam',
-                    text: teacherName,
-                    timer: 1500,
-                    showConfirmButton: false
-                });
-            } catch (error) {
-                console.error('FACE CAPTURE ERROR:', error);
+                speakAI('Wajah tidak terdeteksi. Silakan coba lagi.');
 
                 Swal.fire({
                     icon: 'error',
-                    title: 'Gagal membaca wajah',
-                    text: 'Silakan ulangi proses pengambilan data wajah.'
+                    title: 'Wajah tidak terdeteksi',
+                    text: 'Pastikan wajah jelas, terang, dan menghadap depan.'
                 });
-            } finally {
-                setTimeout(() => {
-                    captureCooldown = false;
-                }, 1000);
-            }
-        }
 
-        window.addEventListener('beforeunload', stopEnrollCamera);
-        document.addEventListener('livewire:navigating', stopEnrollCamera);
+                return;
+            }
+
+            const descriptor = Array.from(detection.descriptor);
+
+            @this.set('descriptor', JSON.stringify(descriptor));
+
+            const teacherName = teacherSelect.options[teacherSelect.selectedIndex].text
+                .replace('(Sudah Terdaftar)', '')
+                .replace('(Belum)', '')
+                .trim();
+
+            document.getElementById('teacherOverlay').innerText = 'Terdeteksi: ' + teacherName;
+            document.getElementById('faceStatus').innerText = 'Data wajah berhasil diambil';
+            document.getElementById('cameraHint').innerText = 'Klik Simpan Data Wajah untuk menyimpan.';
+
+            speakAI('Data wajah ' + teacherName + ' berhasil direkam.');
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Wajah berhasil direkam',
+                text: teacherName,
+                timer: 1500,
+                showConfirmButton: false
+            });
+        }
     </script>
 </div>

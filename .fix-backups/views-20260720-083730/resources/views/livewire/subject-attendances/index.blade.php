@@ -46,8 +46,7 @@
         </section>
 
         <section class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="w-full min-w-[900px]">
+            <table class="w-full">
                 <thead class="bg-slate-50 text-left text-sm text-slate-500">
                     <tr>
                         <th class="p-5">Guru</th>
@@ -87,8 +86,7 @@
                         </tr>
                     @endforelse
                 </tbody>
-                </table>
-            </div>
+            </table>
         </section>
 
         {{ $attendances->links() }}

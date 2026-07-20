@@ -601,12 +601,9 @@
                 document.getElementById('matchScore').innerText =
                     'Tingkat kecocokan: ' + matchPercentage + '%';
 
-                const photoBase64 = captureAttendancePhoto();
-
                 const result = await @this.call(
                     'saveAttendanceByTeacherId',
-                    bestMatch.id,
-                    photoBase64
+                    bestMatch.id
                 );
 
                 handleAttendanceResult(result);
@@ -684,26 +681,6 @@
                     'Perhatian'
                 );
             }
-        }
-
-        function captureAttendancePhoto() {
-            const video = document.getElementById('camera');
-
-            if (!video || video.readyState !== 4 || !video.videoWidth) {
-                return null;
-            }
-
-            const maxWidth = 720;
-            const scale = Math.min(1, maxWidth / video.videoWidth);
-            const canvas = document.createElement('canvas');
-
-            canvas.width = Math.round(video.videoWidth * scale);
-            canvas.height = Math.round(video.videoHeight * scale);
-
-            const context = canvas.getContext('2d');
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            return canvas.toDataURL('image/jpeg', 0.82);
         }
 
         function formatRupiah(value) {

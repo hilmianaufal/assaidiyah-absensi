@@ -9,19 +9,7 @@
                 <div>
                     <p class="text-blue-100 text-sm">Transport Pagi</p>
                     <h1 class="text-2xl lg:text-3xl font-extrabold">Absensi Harian Guru</h1>
-                    @if ($transportSetting)
-                        <p class="text-blue-50 mt-2">
-                            Transport diberikan setelah absen masuk
-                            {{ substr((string) $transportSetting->check_in_start, 0, 5) }}–{{ substr((string) $transportSetting->check_in_end, 0, 5) }}
-                            dan absen pulang
-                            {{ substr((string) $transportSetting->check_out_start, 0, 5) }}–{{ substr((string) $transportSetting->check_out_end, 0, 5) }}.
-                            Nominal Rp{{ number_format($transportSetting->amount, 0, ',', '.') }}.
-                        </p>
-                    @else
-                        <p class="text-blue-50 mt-2">
-                            Pengaturan transport belum aktif. Absensi tetap dicatat tanpa transport.
-                        </p>
-                    @endif
+                    <p class="text-blue-50 mt-2">Jam 06:45 - 07:15 mendapat transport Rp10.000.</p>
                 </div>
                 <a href="{{ route('daily-attendances.pdf', $date) }}"
                     class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-red-500 text-white font-bold shadow">
@@ -41,18 +29,6 @@
             </div>
         </section>
 
-        @if (session('success'))
-            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 font-bold text-emerald-700">
-                {{ session('success') }}
-            </div>
-        @endif
-
-        @if (session('error'))
-            <div class="rounded-2xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">
-                {{ session('error') }}
-            </div>
-        @endif
-
         <section class="grid lg:grid-cols-3 gap-4">
             <div class="lg:col-span-2 bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
                 <div class="relative">
@@ -70,8 +46,7 @@
         </section>
 
         <section class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="w-full min-w-[1100px]">
+            <table class="w-full">
                 <thead class="bg-slate-50 text-left text-sm text-slate-500">
                     <tr>
                         <th class="p-5">Guru</th>
@@ -99,10 +74,11 @@
                             <td class="p-5">
                                 <button
                                     type="button"
-                                    data-check-in-url="{{ $attendance->check_in_photo ? asset('storage/' . $attendance->check_in_photo) : '' }}"
-                                    data-check-out-url="{{ $attendance->check_out_photo ? asset('storage/' . $attendance->check_out_photo) : '' }}"
-                                    data-teacher-name="{{ $attendance->teacher?->name ?? '-' }}"
-                                    onclick="showAttendancePhotosFromButton(this)"
+                                    onclick="showAttendancePhotos(
+                                        '{{ $attendance->check_in_photo ? asset('storage/' . $attendance->check_in_photo) : '' }}',
+                                        '{{ $attendance->check_out_photo ? asset('storage/' . $attendance->check_out_photo) : '' }}',
+                                        '{{ $attendance->teacher->name }}'
+                                    )"
                                     class="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">
                                     Lihat Foto
                                 </button>
@@ -117,14 +93,13 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="p-8 text-center text-slate-500">
+                            <td colspan="8" class="p-8 text-center text-slate-500">
                                 Belum ada absensi hari ini.
                             </td>
                         </tr>
                     @endforelse
                 </tbody>
-                </table>
-            </div>
+            </table>
         </section>
 
         {{ $attendances->links() }}
@@ -204,14 +179,6 @@
 </div>
 </div>
 <script>
-    function showAttendancePhotosFromButton(button) {
-        showAttendancePhotos(
-            button.dataset.checkInUrl || '',
-            button.dataset.checkOutUrl || '',
-            button.dataset.teacherName || '-'
-        );
-    }
-
     function showAttendancePhotos(checkInUrl, checkOutUrl, teacherName) {
         const modal = document.getElementById('photoModal');
 
