@@ -1,0 +1,4985 @@
+==================================================
+KUMPULAN FILE CONTROLLERS DAN LIVEWIRE
+==================================================
+
+==================================================
+FILE: app/Http/Controllers/Api/AuthController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\Rule;
+
+class AuthController extends Controller
+{
+    public function login(Request $request)
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ]);
+
+        $user = User::with('teacher')
+            ->where('email', $data['email'])
+            ->first();
+
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
+            return response()->json([
+                'message' => 'Email atau password salah.',
+            ], 401);
+        }
+
+        if (! in_array($user->role, ['admin', 'guru'], true)) {
+            return response()->json([
+                'message' => 'Role akun tidak diizinkan menggunakan aplikasi.',
+            ], 403);
+        }
+
+        if ($user->role === 'guru' && ! $user->teacher) {
+            return response()->json([
+                'message' => 'Akun guru belum terhubung dengan data guru.',
+            ], 403);
+        }
+
+        $user->tokens()
+            ->where('name', 'android-app')
+            ->delete();
+
+        $token = $user
+            ->createToken('android-app')
+            ->plainTextToken;
+
+        return response()->json([
+            'message' => 'Login berhasil.',
+            'token' => $token,
+            'role' => $user->role,
+            'user' => $user,
+        ]);
+    }
+
+    public function me(Request $request)
+    {
+        $user = $request->user();
+        $user->load('teacher');
+
+        return response()->json([
+            'role' => $user->role,
+            'user' => $user,
+        ]);
+    }
+
+    public function adminWebSession(Request $request)
+    {
+        $user = $request->user();
+
+        if (! $user || strtolower((string) $user->role) !== 'admin') {
+            return response()->json([
+                'message' => 'Menu ini hanya dapat dibuka oleh admin.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'target' => [
+                'required',
+                Rule::in([
+                    'check_in',
+                    'check_out',
+                    'enrollment',
+                ]),
+            ],
+        ]);
+
+        /*
+         * Gunakan signed URL relatif agar tidak bermasalah
+         * dengan HTTPS Cloudflare, Docker, atau reverse proxy.
+         */
+        $relativeUrl = URL::temporarySignedRoute(
+            'mobile.admin.session',
+            now()->addMinutes(10),
+            [
+                'user' => $user->id,
+                'target' => $data['target'],
+            ],
+            false
+        );
+
+        $fullUrl = rtrim((string) config('app.url'), '/')
+            . $relativeUrl;
+
+        return response()->json([
+            'url' => $fullUrl,
+            'expires_in' => 600,
+        ]);
+    }
+
+    public function logout(Request $request)
+    {
+        $request->user()
+            ->currentAccessToken()
+            ?->delete();
+
+        return response()->json([
+            'message' => 'Logout berhasil.',
+        ]);
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Api/TeacherAppController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Api;
+use App\Http\Controllers\Controller;
+use App\Models\Announcement;
+use App\Models\AppNotification;
+use App\Models\DailyAttendance;
+use App\Models\DhuhaReport;
+use App\Models\DhuhaSchedule;
+use App\Models\MonthlyHonor;
+use App\Models\PicketReport;
+use App\Models\PicketReportStudent;
+use App\Models\SubjectAttendance;
+use App\Models\Teacher;
+use App\Models\TeacherHonorPackage;
+use App\Models\TeacherPicketSchedule;
+use App\Models\TeachingSchedule;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+
+class TeacherAppController extends Controller
+{
+    public function dashboard(Request $request)
+    {
+        $teacher = $request->user()->teacher;
+
+        if (! $teacher) {
+            return response()->json([
+                'message' => 'Data guru tidak ditemukan.'
+            ], 404);
+        }
+
+        $todayAttendance = DailyAttendance::where(
+            'teacher_id',
+            $teacher->id
+        )
+        ->whereDate('attendance_date', now())
+        ->first();
+
+        $monthHonor = MonthlyHonor::where(
+            'teacher_id',
+            $teacher->id
+        )
+        ->whereMonth('created_at', now()->month)
+        ->whereYear('created_at', now()->year)
+        ->sum('grand_total');
+
+        $today = [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Ahad',
+        ][now()->format('l')];
+
+        $todaySchedules = TeachingSchedule::with([
+            'subject',
+            'institution'
+        ])
+        ->where('teacher_id', $teacher->id)
+        ->where('day', $today)
+        ->orderBy('start_time')
+        ->get();
+
+        $todayPicket = TeacherPicketSchedule::with('institution')
+            ->where('teacher_id', $teacher->id)
+            ->where('day', $today)
+            ->where('is_active', true)
+            ->first();
+
+        return response()->json([
+            'teacher' => $teacher,
+            'attendance_today' => $todayAttendance,
+            'month_honor' => $monthHonor,
+            'today_schedules' => $todaySchedules,
+            'today_picket' => $todayPicket,
+        ]);
+    }
+
+
+    public function dhuha(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $day = [
+        'Monday' => 'Senin',
+        'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu',
+        'Thursday' => 'Kamis',
+        'Friday' => 'Jumat',
+        'Saturday' => 'Sabtu',
+        'Sunday' => 'Ahad',
+    ][now()->format('l')];
+
+    $schedule = DhuhaSchedule::where('teacher_id', $teacher->id)
+        ->where('day', $day)
+        ->where('is_active', true)
+        ->first();
+
+    $report = DhuhaReport::where('teacher_id', $teacher->id)
+        ->whereDate('report_date', now())
+        ->first();
+
+    return response()->json([
+        'is_allowed' => (bool) $schedule,
+        'schedule' => $schedule,
+        'report' => $report,
+        'teachers' => Teacher::where('is_active', true)->orderBy('name')->get(),
+    ]);
+}
+
+public function saveDhuha(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $data = $request->validate([
+        'status' => ['required', 'in:done,not_done'],
+        'present_teacher_ids' => ['nullable', 'array'],
+        'present_teacher_ids.*' => ['exists:teachers,id'],
+        'note' => ['nullable', 'string'],
+    ]);
+
+    $presentIds = $data['present_teacher_ids'] ?? [];
+
+    $presentTeachers = Teacher::whereIn('id', $presentIds)->orderBy('name')->get();
+
+    $teacherList = $presentTeachers->isNotEmpty()
+        ? $presentTeachers->values()->map(fn ($item, $index) => ($index + 1) . '. ' . $item->name)->implode("\n")
+        : '-';
+
+    $statusText = $data['status'] === 'done' ? 'Terlaksana' : 'Tidak Terlaksana';
+
+    $message = "📢 *LAPORAN SHOLAT DHUHA*\n\n"
+        . "Hari/Tanggal : " . now()->locale('id')->translatedFormat('l, d F Y') . "\n"
+        . "Pelapor      : {$teacher->name}\n"
+        . "Status       : {$statusText}\n\n"
+        . "*Guru Hadir:*\n{$teacherList}\n\n"
+        . "Jumlah Hadir : " . $presentTeachers->count() . " guru\n\n"
+        . "Keterangan:\n"
+        . ($data['note'] ?? '-') . "\n\n"
+        . "Wassalamu’alaikum Wr. Wb.";
+
+    $report = DhuhaReport::updateOrCreate(
+        [
+            'teacher_id' => $teacher->id,
+            'report_date' => now()->toDateString(),
+        ],
+        [
+            'institution_id' => null,
+            'status' => $data['status'],
+            'present_teacher_ids' => $presentIds,
+            'teacher_count' => count($presentIds),
+            'imam_name' => null,
+            'note' => $data['note'] ?? null,
+            'whatsapp_message' => $message,
+        ]
+    );
+
+    return response()->json([
+        'message' => 'Laporan dhuha berhasil disimpan.',
+        'report' => $report,
+    ]);
+}
+
+public function picketSubjectAttendances(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $day = [
+        'Monday' => 'Senin',
+        'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu',
+        'Thursday' => 'Kamis',
+        'Friday' => 'Jumat',
+        'Saturday' => 'Sabtu',
+        'Sunday' => 'Ahad',
+    ][now()->format('l')];
+
+    $picketSchedule = TeacherPicketSchedule::with('institution')
+        ->where('teacher_id', $teacher->id)
+        ->where('day', $day)
+        ->where('is_active', true)
+        ->first();
+
+    if (! $teacher->is_picket_officer || ! $picketSchedule) {
+        return response()->json([
+            'is_allowed' => false,
+            'message' => 'Anda tidak memiliki jadwal piket hari ini.',
+            'schedules' => [],
+            'attendances' => [],
+            'picket_schedule' => null,
+        ]);
+    }
+
+    $schedules = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+        ->where('day', $day)
+        ->where('institution_id', $picketSchedule->institution_id)
+        ->orderBy('start_time')
+        ->get();
+
+    $attendances = SubjectAttendance::whereDate('teaching_date', now()->toDateString())
+        ->where('institution_id', $picketSchedule->institution_id)
+        ->get()
+        ->keyBy('teaching_schedule_id');
+
+    return response()->json([
+        'is_allowed' => true,
+        'picket_schedule' => $picketSchedule,
+        'schedules' => $schedules,
+        'attendances' => $attendances,
+    ]);
+}
+
+public function markPicketSubjectAttendance(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $data = $request->validate([
+        'teaching_schedule_id' => ['required', 'exists:teaching_schedules,id'],
+        'status' => ['required', 'in:present,late,permit,sick,absent'],
+    ]);
+
+    $day = [
+        'Monday' => 'Senin',
+        'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu',
+        'Thursday' => 'Kamis',
+        'Friday' => 'Jumat',
+        'Saturday' => 'Sabtu',
+        'Sunday' => 'Ahad',
+    ][now()->format('l')];
+
+    $picketSchedule = TeacherPicketSchedule::where('teacher_id', $teacher->id)
+        ->where('day', $day)
+        ->where('is_active', true)
+        ->first();
+
+    if (! $teacher->is_picket_officer || ! $picketSchedule) {
+        return response()->json([
+            'message' => 'Anda tidak memiliki akses piket hari ini.',
+        ], 403);
+    }
+
+    $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+        ->where('institution_id', $picketSchedule->institution_id)
+        ->findOrFail($data['teaching_schedule_id']);
+
+    $oldAttendance = SubjectAttendance::where([
+        'teacher_id' => $schedule->teacher_id,
+        'subject_id' => $schedule->subject_id,
+        'teaching_schedule_id' => $schedule->id,
+        'teaching_date' => now()->toDateString(),
+    ])->first();
+
+    $oldStatus = $oldAttendance?->attendance_status;
+
+    $isPaid = in_array($data['status'], ['present', 'late']);
+
+    $package = TeacherHonorPackage::where('teacher_id', $schedule->teacher_id)
+        ->where('institution_id', $schedule->institution_id)
+        ->where('is_active', true)
+        ->first();
+
+    $ratePerHour = $package?->deduction_per_hour ?? 0;
+
+    $teachingHonor = $isPaid
+        ? ($schedule->hours_count * $ratePerHour)
+        : 0;
+
+    $attendance = SubjectAttendance::updateOrCreate(
+        [
+            'teacher_id' => $schedule->teacher_id,
+            'subject_id' => $schedule->subject_id,
+            'teaching_schedule_id' => $schedule->id,
+            'teaching_date' => now()->toDateString(),
+        ],
+        [
+            'institution_id' => $schedule->institution_id,
+            'recorded_by_teacher_id' => $teacher->id,
+            'source' => 'android_picket',
+            'attendance_status' => $data['status'],
+            'recorded_at' => now(),
+
+            'start_time' => $schedule->start_time,
+            'end_time' => $schedule->end_time,
+            'hours_count' => $schedule->hours_count,
+            'hourly_rate' => $ratePerHour,
+            'teaching_honor' => $teachingHonor,
+            'class_name' => $schedule->class_name,
+            'status' => $data['status'],
+            'note' => 'Dicatat dari aplikasi Android oleh guru piket: ' . $teacher->name,
+        ]
+    );
+
+    if ($oldStatus !== $data['status']) {
+        $statusText = [
+            'present' => 'Hadir',
+            'late' => 'Terlambat',
+            'permit' => 'Izin',
+            'sick' => 'Sakit',
+            'absent' => 'Alpa',
+        ][$data['status']] ?? $data['status'];
+
+        \App\Models\AppNotification::create([
+            'teacher_id' => $schedule->teacher_id,
+            'title' => 'Absensi mapel dicatat',
+            'message' => 'Status mengajar Anda pada mapel ' .
+                $schedule->subject->name .
+                ' kelas ' .
+                $schedule->class_name .
+                ' dicatat: ' .
+                $statusText .
+                '.',
+            'type' => in_array($data['status'], ['present', 'late'])
+                ? 'success'
+                : 'warning',
+        ]);
+
+        if ($teachingHonor > 0) {
+            \App\Models\AppNotification::create([
+                'teacher_id' => $schedule->teacher_id,
+                'title' => 'Honor berjalan bertambah',
+                'message' => 'Honor mengajar Anda bertambah Rp ' .
+                    number_format($teachingHonor, 0, ',', '.') .
+                    ' dari mapel ' .
+                    $schedule->subject->name .
+                    '.',
+                'type' => 'success',
+            ]);
+        }
+    }
+
+    return response()->json([
+        'message' => 'Absensi mapel berhasil disimpan.',
+        'attendance' => $attendance,
+    ]);
+}
+
+public function picketReport(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $report = PicketReport::with('students')
+        ->where('teacher_id', $teacher->id)
+        ->whereDate('report_date', now()->toDateString())
+        ->first();
+
+    return response()->json([
+        'report' => $report,
+        'classes' => [
+            'Kelas 10',
+            'Kelas 11 Paket 1',
+            'Kelas 11 Paket 2',
+            'Kelas 12 Paket 1',
+            'Kelas 12 Paket 2',
+        ],
+    ]);
+}
+
+public function savePicketReport(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $data = $request->validate([
+        'teacher_absences' => ['nullable', 'string'],
+        'students' => ['nullable', 'array'],
+        'students.*.class_name' => ['required', 'string'],
+        'students.*.student_name' => ['required', 'string'],
+        'students.*.status' => ['required', 'string'],
+    ]);
+
+    $classes = [
+        'Kelas 10',
+        'Kelas 11 Paket 1',
+        'Kelas 11 Paket 2',
+        'Kelas 12 Paket 1',
+        'Kelas 12 Paket 2',
+    ];
+
+    $teacherAbsences = trim($data['teacher_absences'] ?? '') ?: '-';
+
+    $message = "Bismillahirrahmanirrahim...\n\n";
+    $message .= "📅 " . now()->locale('id')->translatedFormat('l, d F Y') . "\n";
+    $message .= "📌 Guru Piket: {$teacher->name}\n\n";
+    $message .= "🔖 Guru yang berhalangan hadir :\n";
+    $message .= "{$teacherAbsences}\n\n";
+    $message .= "📝 Siswa yang tidak masuk :\n\n";
+
+    foreach ($classes as $class) {
+        $message .= "🏘️ {$class}\n";
+
+        $items = collect($data['students'] ?? [])
+            ->where('class_name', $class)
+            ->values();
+
+        if ($items->isEmpty()) {
+            $message .= "Berangkat semua\n\n";
+            continue;
+        }
+
+        foreach ($items as $i => $student) {
+            $no = $i + 1;
+            $message .= "{$no}. {$student['student_name']} ({$student['status']})\n";
+        }
+
+        $message .= "\n";
+    }
+
+    $message .= "🌹 Terima kasih🌹\n\n";
+    $message .= "Absen Online ✅";
+
+    $report = PicketReport::updateOrCreate(
+        [
+            'teacher_id' => $teacher->id,
+            'report_date' => now()->toDateString(),
+        ],
+        [
+            'teacher_absences' => $teacherAbsences,
+            'whatsapp_message' => $message,
+        ]
+    );
+
+    $report->students()->delete();
+
+    foreach ($data['students'] ?? [] as $student) {
+        PicketReportStudent::create([
+            'picket_report_id' => $report->id,
+            'class_name' => $student['class_name'],
+            'student_name' => $student['student_name'],
+            'status' => $student['status'],
+        ]);
+    }
+
+    return response()->json([
+        'message' => 'Laporan piket berhasil disimpan.',
+        'report' => $report->load('students'),
+    ]);
+}
+
+public function honors(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $month = $request->query('month', now()->month);
+    $year = $request->query('year', now()->year);
+
+    $honors = MonthlyHonor::with(['institution', 'payments'])
+        ->where('teacher_id', $teacher->id)
+        ->where('month', $month)
+        ->where('year', $year)
+        ->get();
+
+    $subjectAttendances = \App\Models\SubjectAttendance::with(['subject', 'institution'])
+        ->where('teacher_id', $teacher->id)
+        ->whereMonth('teaching_date', $month)
+        ->whereYear('teaching_date', $year)
+        ->latest('teaching_date')
+        ->get();
+
+    $runningTeachingHonor = $subjectAttendances
+        ->whereIn('attendance_status', ['present', 'late'])
+        ->sum('teaching_honor');
+
+    $runningHours = $subjectAttendances
+        ->whereIn('attendance_status', ['present', 'late'])
+        ->sum('hours_count');
+
+    $additionalHonors = \App\Models\AdditionalHonor::with('institution')
+        ->where('teacher_id', $teacher->id)
+        ->where('month', $month)
+        ->where('year', $year)
+        ->latest()
+        ->get();
+
+    $runningTransport = \App\Models\DailyAttendance::where('teacher_id', $teacher->id)
+        ->whereMonth('attendance_date', $month)
+        ->whereYear('attendance_date', $year)
+        ->sum('transport_amount');
+
+    return response()->json([
+        'honors' => $honors,
+        'total_honor' => $honors->sum('grand_total'),
+
+        'running' => [
+            'teaching_honor' => $runningTeachingHonor,
+            'hours' => $runningHours,
+            'transport' => $runningTransport,
+            'additional_honor' => $additionalHonors->sum('amount'),
+            'estimated_total' =>
+                $runningTeachingHonor +
+                $runningTransport +
+                $additionalHonors->sum('amount'),
+    ],
+
+        'subject_attendances' => $subjectAttendances,
+        'additional_honors' => $additionalHonors,
+    ]);
+}
+
+public function honorSlip(Request $request, MonthlyHonor $honor)
+{
+    $teacher = $request->user()->teacher;
+
+    abort_if($honor->teacher_id !== $teacher->id, 403);
+
+    $honor->load([
+        'teacher',
+        'institution',
+        'payments',
+    ]);
+
+    $pdf = Pdf::loadView(
+        'pdf.teacher-honor-slip',
+        compact('honor')
+    )->setPaper('a4');
+
+    return $pdf->download(
+        'slip-honor-'.$honor->month.'-'.$honor->year.'.pdf'
+    );
+}
+
+public function attendances(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $month = $request->query('month', now()->month);
+    $year = $request->query('year', now()->year);
+
+    $attendances = DailyAttendance::where('teacher_id', $teacher->id)
+        ->whereMonth('attendance_date', $month)
+        ->whereYear('attendance_date', $year)
+        ->latest('attendance_date')
+        ->get();
+
+    return response()->json([
+        'month' => (int) $month,
+        'year' => (int) $year,
+        'attendances' => $attendances,
+    ]);
+}
+
+public function announcements(Request $request)
+{
+    $announcements = Announcement::where('is_active', true)
+        ->latest()
+        ->take(30)
+        ->get();
+
+    return response()->json([
+        'announcements' => $announcements,
+    ]);
+}
+
+public function updateProfile(Request $request)
+{
+    $user = $request->user();
+    $teacher = $user->teacher;
+
+    if (! $teacher) {
+        return response()->json([
+            'message' => 'Data guru tidak ditemukan.',
+        ], 404);
+    }
+
+    $data = $request->validate([
+        'name' => ['required', 'string', 'max:255'],
+        'email' => ['required', 'email', 'unique:users,email,' . $user->id],
+        'phone' => ['nullable', 'string', 'max:50'],
+        'password' => ['nullable', 'string', 'min:6'],
+        'photo' => ['nullable', 'image', 'max:2048'],
+    ]);
+
+    if ($request->hasFile('photo')) {
+        $file = $request->file('photo');
+        $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+
+        $file->storeAs('uploads/teachers', $fileName, 'public');
+
+        $teacher->photo = 'storage/uploads/teachers/' . $fileName;
+    }
+
+    $teacher->update([
+        'name' => $data['name'],
+        'phone' => $data['phone'] ?? null,
+        'photo' => $teacher->photo,
+    ]);
+
+    $userData = [
+        'name' => $data['name'],
+        'email' => $data['email'],
+    ];
+
+    if (! empty($data['password'])) {
+        $userData['password'] = Hash::make($data['password']);
+    }
+
+    $user->update($userData);
+
+    return response()->json([
+        'message' => 'Profil berhasil diperbarui.',
+        'user' => $user->load('teacher'),
+    ]);
+}
+
+public function notifications(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $notifications = AppNotification::where(function ($query) use ($teacher) {
+            $query->whereNull('teacher_id')
+                ->orWhere('teacher_id', $teacher->id);
+        })
+        ->latest()
+        ->take(50)
+        ->get();
+
+    $unreadCount = $notifications->whereNull('read_at')->count();
+
+    return response()->json([
+        'unread_count' => $unreadCount,
+        'notifications' => $notifications,
+    ]);
+}
+
+public function markNotificationAsRead(Request $request, AppNotification $notification)
+{
+    $teacher = $request->user()->teacher;
+
+    if ($notification->teacher_id && $notification->teacher_id !== $teacher->id) {
+        abort(403);
+    }
+
+    $notification->update([
+        'read_at' => now(),
+    ]);
+
+    return response()->json([
+        'message' => 'Notifikasi sudah dibaca.',
+        'notification' => $notification,
+    ]);
+}
+
+public function schedules(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    if (! $teacher) {
+        return response()->json([
+            'message' => 'Data guru tidak ditemukan.'
+        ], 404);
+    }
+
+    $schedules = TeachingSchedule::with([
+        'subject',
+        'institution',
+    ])
+    ->where('teacher_id', $teacher->id)
+    ->orderBy('day')
+    ->orderBy('start_time')
+    ->get();
+
+    return response()->json([
+        'schedules' => $schedules,
+    ]);
+}
+
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/AuthenticatedSessionController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\View\View;
+
+class AuthenticatedSessionController extends Controller
+{
+    /**
+     * Display the login view.
+     */
+    public function create(): View
+    {
+        return view('auth.login');
+    }
+
+    /**
+     * Handle an incoming authentication request.
+     */
+    public function store(LoginRequest $request): RedirectResponse
+    {
+        $request->authenticate();
+
+        $request->session()->regenerate();
+
+        if (auth()->user()->role === 'guru') {
+        return redirect()->intended(route('teacher.dashboard'));
+        }
+
+        return redirect()->intended(route('dashboard'));
+    }
+
+    /**
+     * Destroy an authenticated session.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        Auth::guard('web')->logout();
+
+        $request->session()->invalidate();
+
+        $request->session()->regenerateToken();
+
+        return redirect('/');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/ConfirmablePasswordController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class ConfirmablePasswordController extends Controller
+{
+    /**
+     * Show the confirm password view.
+     */
+    public function show(): View
+    {
+        return view('auth.confirm-password');
+    }
+
+    /**
+     * Confirm the user's password.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        if (! Auth::guard('web')->validate([
+            'email' => $request->user()->email,
+            'password' => $request->password,
+        ])) {
+            throw ValidationException::withMessages([
+                'password' => __('auth.password'),
+            ]);
+        }
+
+        $request->session()->put('auth.password_confirmed_at', time());
+
+        return redirect()->intended(route('dashboard', absolute: false));
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/EmailVerificationNotificationController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+
+class EmailVerificationNotificationController extends Controller
+{
+    /**
+     * Send a new email verification notification.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        if ($request->user()->hasVerifiedEmail()) {
+            return redirect()->intended(route('dashboard', absolute: false));
+        }
+
+        $request->user()->sendEmailVerificationNotification();
+
+        return back()->with('status', 'verification-link-sent');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/EmailVerificationPromptController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+
+class EmailVerificationPromptController extends Controller
+{
+    /**
+     * Display the email verification prompt.
+     */
+    public function __invoke(Request $request): RedirectResponse|View
+    {
+        return $request->user()->hasVerifiedEmail()
+                    ? redirect()->intended(route('dashboard', absolute: false))
+                    : view('auth.verify-email');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/NewPasswordController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class NewPasswordController extends Controller
+{
+    /**
+     * Display the password reset view.
+     */
+    public function create(Request $request): View
+    {
+        return view('auth.reset-password', ['request' => $request]);
+    }
+
+    /**
+     * Handle an incoming new password request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'token' => ['required'],
+            'email' => ['required', 'email'],
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ]);
+
+        // Here we will attempt to reset the user's password. If it is successful we
+        // will update the password on an actual user model and persist it to the
+        // database. Otherwise we will parse the error and return the response.
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user) use ($request) {
+                $user->forceFill([
+                    'password' => Hash::make($request->password),
+                    'remember_token' => Str::random(60),
+                ])->save();
+
+                event(new PasswordReset($user));
+            }
+        );
+
+        // If the password was successfully reset, we will redirect the user back to
+        // the application's home authenticated view. If there is an error we can
+        // redirect them back to where they came from with their error message.
+        return $status == Password::PASSWORD_RESET
+                    ? redirect()->route('login')->with('status', __($status))
+                    : back()->withInput($request->only('email'))
+                        ->withErrors(['email' => __($status)]);
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/PasswordController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
+
+class PasswordController extends Controller
+{
+    /**
+     * Update the user's password.
+     */
+    public function update(Request $request): RedirectResponse
+    {
+        $validated = $request->validateWithBag('updatePassword', [
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', Password::defaults(), 'confirmed'],
+        ]);
+
+        $request->user()->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return back()->with('status', 'password-updated');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/PasswordResetLinkController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class PasswordResetLinkController extends Controller
+{
+    /**
+     * Display the password reset link request view.
+     */
+    public function create(): View
+    {
+        return view('auth.forgot-password');
+    }
+
+    /**
+     * Handle an incoming password reset link request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        // We will send the password reset link to this user. Once we have attempted
+        // to send the link, we will examine the response then see the message we
+        // need to show to the user. Finally, we'll send out a proper response.
+        $status = Password::sendResetLink(
+            $request->only('email')
+        );
+
+        return $status == Password::RESET_LINK_SENT
+                    ? back()->with('status', __($status))
+                    : back()->withInput($request->only('email'))
+                        ->withErrors(['email' => __($status)]);
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/RegisteredUserController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class RegisteredUserController extends Controller
+{
+    /**
+     * Display the registration view.
+     */
+    public function create(): View
+    {
+        return view('auth.register');
+    }
+
+    /**
+     * Handle an incoming registration request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+        ]);
+
+        event(new Registered($user));
+
+        Auth::login($user);
+
+        return redirect(route('dashboard', absolute: false));
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Auth/VerifyEmailController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Foundation\Auth\EmailVerificationRequest;
+use Illuminate\Http\RedirectResponse;
+
+class VerifyEmailController extends Controller
+{
+    /**
+     * Mark the authenticated user's email address as verified.
+     */
+    public function __invoke(EmailVerificationRequest $request): RedirectResponse
+    {
+        if ($request->user()->hasVerifiedEmail()) {
+            return redirect()->intended(route('dashboard', absolute: false).'?verified=1');
+        }
+
+        if ($request->user()->markEmailAsVerified()) {
+            event(new Verified($request->user()));
+        }
+
+        return redirect()->intended(route('dashboard', absolute: false).'?verified=1');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/Controller.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+abstract class Controller
+{
+    //
+}
+
+
+==================================================
+FILE: app/Http/Controllers/DailyAttendancePdfController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\DailyAttendance;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class DailyAttendancePdfController extends Controller
+{
+    public function show(string $date)
+    {
+        $attendances = DailyAttendance::with('teacher')
+            ->whereDate('attendance_date', $date)
+            ->orderBy('check_in_time')
+            ->get();
+
+        $pdf = Pdf::loadView('pdf.daily-attendance', [
+            'attendances' => $attendances,
+            'date' => $date,
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download('rekap-absensi-harian-' . $date . '.pdf');
+    }
+}
+
+==================================================
+FILE: app/Http/Controllers/HonorPaymentReceiptController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\HonorPayment;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class HonorPaymentReceiptController extends Controller
+{
+    public function show(HonorPayment $payment)
+    {
+        $payment->load('monthlyHonor.teacher');
+
+        $pdf = Pdf::loadView('pdf.honor-payment-receipt', [
+            'payment' => $payment,
+            'honor' => $payment->monthlyHonor,
+            'teacher' => $payment->monthlyHonor->teacher,
+        ])->setPaper('a5', 'portrait');
+
+        return $pdf->download('bukti-pembayaran-honor.pdf');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/HonorPdfController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\MonthlyHonor;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class HonorPdfController extends Controller
+{
+    public function show(MonthlyHonor $honor)
+    {
+        $honor->load('teacher');
+
+        $pdf = Pdf::loadView('pdf.honor-slip', [
+            'honor' => $honor,
+        ])->setPaper('a4', 'portrait');
+
+        return $pdf->download('slip-honor-' . $honor->teacher->name . '.pdf');
+    }
+}
+
+==================================================
+FILE: app/Http/Controllers/InstitutionHonorReportPdfController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Institution;
+use App\Models\MonthlyHonor;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class InstitutionHonorReportPdfController extends Controller
+{
+    public function show(Institution $institution, int $month, int $year)
+    {
+        $honors = MonthlyHonor::with(['teacher', 'payments'])
+            ->where('institution_id', $institution->id)
+            ->where('month', $month)
+            ->where('year', $year)
+            ->orderBy('teacher_id')
+            ->get();
+
+        $pdf = Pdf::loadView('pdf.institution-honor-report', [
+            'institution' => $institution,
+            'honors' => $honors,
+            'month' => $month,
+            'year' => $year,
+            'totalHonor' => $honors->sum('grand_total'),
+            'totalPaid' => $honors->sum(fn ($honor) => $honor->payments->sum('amount')),
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download('rekap-honor-' . str($institution->code)->slug() . '-' . $month . '-' . $year . '.pdf');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/MobileAdminSessionController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class MobileAdminSessionController extends Controller
+{
+    public function __invoke(Request $request)
+    {
+        $target = (string) $request->query('target');
+        $userId = (int) $request->query('user');
+
+        if (! in_array(
+            $target,
+            ['check_in', 'check_out', 'enrollment'],
+            true
+        )) {
+            abort(403, 'Target halaman admin tidak valid.');
+        }
+
+        $user = User::find($userId);
+
+        if (
+            ! $user ||
+            strtolower((string) $user->role) !== 'admin'
+        ) {
+            abort(403, 'Akun tidak memiliki akses admin.');
+        }
+
+        /*
+         * Membuat sesi login web Laravel untuk WebView.
+         */
+        Auth::guard('web')->login($user);
+
+        $request->session()->regenerate();
+
+        $path = match ($target) {
+            'check_in' =>
+                '/face-attendance?mode=check_in&mobile=1',
+
+            'check_out' =>
+                '/face-attendance?mode=check_out&mobile=1',
+
+            'enrollment' =>
+                '/face-enrollment?mobile=1',
+        };
+
+        $destination = rtrim(
+            (string) config('app.url'),
+            '/'
+        ) . $path;
+
+        return redirect()->away($destination);
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/ProfileController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\ProfileUpdateRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\View\View;
+
+class ProfileController extends Controller
+{
+    /**
+     * Display the user's profile form.
+     */
+    public function edit(Request $request): View
+    {
+        return view('profile.edit', [
+            'user' => $request->user(),
+        ]);
+    }
+
+    /**
+     * Update the user's profile information.
+     */
+    public function update(ProfileUpdateRequest $request): RedirectResponse
+    {
+        $request->user()->fill($request->validated());
+
+        if ($request->user()->isDirty('email')) {
+            $request->user()->email_verified_at = null;
+        }
+
+        $request->user()->save();
+
+        return Redirect::route('profile.edit')->with('status', 'profile-updated');
+    }
+
+    /**
+     * Delete the user's account.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        $request->validateWithBag('userDeletion', [
+            'password' => ['required', 'current_password'],
+        ]);
+
+        $user = $request->user();
+
+        Auth::logout();
+
+        $user->delete();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return Redirect::to('/');
+    }
+}
+
+
+==================================================
+FILE: app/Http/Controllers/SubjectAttendancePdfController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\SubjectAttendance;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class SubjectAttendancePdfController extends Controller
+{
+    public function show(string $date)
+    {
+        $attendances = SubjectAttendance::with(['teacher', 'subject'])
+            ->whereDate('teaching_date', $date)
+            ->orderBy('start_time')
+            ->get();
+
+        $pdf = Pdf::loadView('pdf.subject-attendance', [
+            'attendances' => $attendances,
+            'date' => $date,
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download('rekap-absensi-mapel-' . $date . '.pdf');
+    }
+}
+
+==================================================
+FILE: app/Http/Controllers/TeacherHonorPdfController.php
+==================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\AdditionalHonor;
+use App\Models\MonthlyHonor;
+use Barryvdh\DomPDF\Facade\Pdf;
+
+class TeacherHonorPdfController extends Controller
+{
+    public function download(int $month, int $year)
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun ini belum terhubung dengan data guru.');
+        }
+
+        $honor = MonthlyHonor::where('teacher_id', $teacher->id)
+            ->where('month', $month)
+            ->where('year', $year)
+            ->firstOrFail();
+
+        $additionalHonors = AdditionalHonor::where('teacher_id', $teacher->id)
+            ->where('month', $month)
+            ->where('year', $year)
+            ->get();
+
+        $pdf = Pdf::loadView('pdf.teacher-honor-slip', [
+            'teacher' => $teacher,
+            'honor' => $honor,
+            'additionalHonors' => $additionalHonors,
+        ])->setPaper('a4', 'portrait');
+
+        return $pdf->download('slip-honor-' . $teacher->name . '-' . $month . '-' . $year . '.pdf');
+    }
+    public function downloadByHonor(MonthlyHonor $honor)
+{
+    $teacher = auth()->user()->teacher;
+
+    if (! $teacher) {
+        abort(403, 'Akun ini belum terhubung dengan data guru.');
+    }
+
+    if ($honor->teacher_id !== $teacher->id && auth()->user()->role !== 'admin') {
+        abort(403);
+    }
+
+    $honor->load(['teacher', 'institution']);
+
+    $additionalHonors = \App\Models\AdditionalHonor::where('teacher_id', $honor->teacher_id)
+        ->where('institution_id', $honor->institution_id)
+        ->where('month', $honor->month)
+        ->where('year', $honor->year)
+        ->get();
+
+    $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.teacher-honor-slip', [
+        'teacher' => $honor->teacher,
+        'honor' => $honor,
+        'additionalHonors' => $additionalHonors,
+    ])->setPaper('a4', 'portrait');
+
+    return $pdf->download(
+        'slip-honor-' .
+        str($honor->teacher->name)->slug('-') . '-' .
+        str($honor->institution?->name ?? 'lembaga')->slug('-') . '-' .
+        $honor->month . '-' . $honor->year . '.pdf'
+    );
+}
+}
+
+
+==================================================
+FILE: app/Livewire/AdditionalHonors/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\AdditionalHonors;
+
+use App\Models\AdditionalHonor;
+use App\Models\Institution;
+use App\Models\Teacher;
+use Illuminate\Contracts\View\View;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public int $month;
+    public int $year;
+
+    public ?int $institution_id = null;
+    public ?int $teacher_id = null;
+
+    public string $title = '';
+    public int $amount = 0;
+    public string $note = '';
+
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    protected string $paginationTheme = 'tailwind';
+
+    public function mount(): void
+    {
+        $this->month = now()->month;
+        $this->year = now()->year;
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedMonth(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedYear(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacher_id = null;
+
+        if (! $this->institution_id) {
+            return;
+        }
+
+        $firstTeacher = Teacher::query()
+            ->where('is_active', true)
+            ->whereHas('institutions', function ($q) {
+                $q->where('institutions.id', $this->institution_id);
+            })
+            ->orderBy('name')
+            ->first();
+
+        $this->teacher_id = $firstTeacher?->id;
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $honor = AdditionalHonor::findOrFail($id);
+
+        $this->editingId = $honor->id;
+        $this->institution_id = (int) $honor->institution_id;
+        $this->teacher_id = (int) $honor->teacher_id;
+        $this->title = $honor->title;
+        $this->month = (int) $honor->month;
+        $this->year = (int) $honor->year;
+        $this->amount = (int) $honor->amount;
+        $this->note = $honor->note ?? '';
+
+        $this->resetValidation();
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        if (! $this->teacher_id && $this->institution_id) {
+            $this->updatedInstitutionId();
+        }
+
+        $data = $this->validate([
+            'institution_id' => ['required', 'integer', 'exists:institutions,id'],
+            'teacher_id' => ['required', 'integer', 'exists:teachers,id'],
+            'title' => ['required', 'string', 'max:255'],
+            'month' => ['required', 'integer', 'min:1', 'max:12'],
+            'year' => ['required', 'integer', 'min:2020', 'max:2100'],
+            'amount' => ['required', 'integer', 'min:0'],
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        AdditionalHonor::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->resetPage();
+
+        session()->flash('success', 'Tambahan honor berhasil disimpan.');
+    }
+
+    public function delete(int $id): void
+    {
+        AdditionalHonor::findOrFail($id)->delete();
+
+        $this->resetPage();
+
+        session()->flash('success', 'Tambahan honor berhasil dihapus.');
+    }
+
+    public function closeModal(): void
+    {
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->institution_id = null;
+        $this->teacher_id = null;
+        $this->title = '';
+        $this->amount = 0;
+        $this->note = '';
+
+        $this->resetValidation();
+    }
+
+    public function render(): View
+    {
+        $search = trim($this->search);
+
+        $additionalHonors = AdditionalHonor::query()
+            ->with(['teacher', 'institution'])
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->when($search !== '', function ($query) use ($search) {
+                $keyword = '%' . $search . '%';
+
+                $query->where(function ($q) use ($keyword) {
+                    $q->where('title', 'like', $keyword)
+                        ->orWhere('note', 'like', $keyword)
+                        ->orWhereHas('teacher', function ($teacherQuery) use ($keyword) {
+                            $teacherQuery->where('name', 'like', $keyword);
+                        })
+                        ->orWhereHas('institution', function ($institutionQuery) use ($keyword) {
+                            $institutionQuery->where('name', 'like', $keyword);
+                        });
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        $institutions = Institution::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        $teachers = Teacher::query()
+            ->where('is_active', true)
+            ->when($this->institution_id, function ($query) {
+                $query->whereHas('institutions', function ($q) {
+                    $q->where('institutions.id', $this->institution_id);
+                });
+            })
+            ->orderBy('name')
+            ->get();
+
+        return view('livewire.additional-honors.index', [
+            'additionalHonors' => $additionalHonors,
+            'institutions' => $institutions,
+            'teachers' => $teachers,
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/DailyAttendances/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\DailyAttendances;
+
+use App\Exports\DailyAttendancesExport;
+use App\Models\DailyAttendance;
+use App\Models\Teacher;
+use Carbon\Carbon;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Maatwebsite\Excel\Facades\Excel;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $date = '';
+    public string $teacher_id = '';
+
+    public bool $showModal = false;
+
+    public function mount(): void
+    {
+        $this->date = now()->toDateString();
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedDate(): void
+    {
+        $this->resetPage();
+    }
+
+    public function openAttendance(): void
+    {
+        $this->teacher_id = '';
+        $this->showModal = true;
+    }
+
+    public function saveAttendance(): void
+    {
+        $this->validate([
+            'teacher_id' => ['required', 'exists:teachers,id'],
+        ]);
+
+        $now = now();
+        $time = $now->format('H:i:s');
+
+        $start = Carbon::createFromTimeString('06:45:00');
+        $end = Carbon::createFromTimeString('07:15:00');
+
+        $isTransport = $now->betweenIncluded($start, $end);
+
+        DailyAttendance::updateOrCreate(
+            [
+                'teacher_id' => $this->teacher_id,
+                'attendance_date' => $now->toDateString(),
+            ],
+            [
+                'attendance_time' => $time,
+                'status' => 'present',
+                'transport_amount' => $isTransport ? 10000 : 0,
+                'note' => $isTransport
+                    ? 'Hadir tepat waktu, mendapat transport.'
+                    : 'Hadir di luar waktu transport, hanya menggugurkan kewajiban.',
+            ]
+        );
+
+        $this->showModal = false;
+        $this->teacher_id = '';
+    }
+
+    public function delete(int $id): void
+    {
+        DailyAttendance::findOrFail($id)->delete();
+    }
+
+    public function render()
+    {
+        $attendances = DailyAttendance::query()
+            ->with('teacher')
+            ->when($this->date, fn ($query) =>
+                $query->whereDate('attendance_date', $this->date)
+            )
+            ->when($this->search, fn ($query) =>
+                $query->whereHas('teacher', fn ($q) =>
+                    $q->where('name', 'like', '%' . $this->search . '%')
+                )
+            )
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.daily-attendances.index', [
+            'attendances' => $attendances,
+            'teachers' => Teacher::where('is_active', true)->orderBy('name')->get(),
+        ])->layout('layouts.app');
+    }
+
+    public function exportExcel()
+{
+    return Excel::download(
+        new DailyAttendancesExport($this->date),
+        'absensi-harian-' . $this->date . '.xlsx'
+    );
+}
+}
+
+==================================================
+FILE: app/Livewire/Dashboard/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\Dashboard;
+
+use App\Models\DailyAttendance;
+use App\Models\MonthlyHonor;
+use App\Models\Teacher;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public function render()
+    {
+        $today = now()->toDateString();
+        $month = now()->month;
+        $year = now()->year;
+
+        $totalTeachers = Teacher::where('is_active', true)->count();
+
+        $presentToday = DailyAttendance::whereDate('attendance_date', $today)
+            ->whereNotNull('check_in_time')
+            ->count();
+
+        $notPresentToday = max($totalTeachers - $presentToday, 0);
+
+        $lateToday = DailyAttendance::whereDate('attendance_date', $today)
+            ->where('check_in_status', 'late')
+            ->count();
+
+        $checkedOutToday = DailyAttendance::whereDate('attendance_date', $today)
+            ->whereNotNull('check_out_time')
+            ->count();
+
+        $transportToday = DailyAttendance::whereDate('attendance_date', $today)
+            ->sum('transport_amount');
+
+        $honorThisMonth = MonthlyHonor::where('month', $month)
+            ->where('year', $year)
+            ->sum('grand_total');
+
+        $recentActivities = DailyAttendance::with('teacher')
+            ->whereDate('attendance_date', $today)
+            ->latest('updated_at')
+            ->take(10)
+            ->get();
+
+        return view('livewire.dashboard.index', [
+            'totalTeachers' => $totalTeachers,
+            'presentToday' => $presentToday,
+            'notPresentToday' => $notPresentToday,
+            'lateToday' => $lateToday,
+            'checkedOutToday' => $checkedOutToday,
+            'transportToday' => $transportToday,
+            'honorThisMonth' => $honorThisMonth,
+            'recentActivities' => $recentActivities,
+        ])->layout('layouts.app');
+    }
+}
+
+==================================================
+FILE: app/Livewire/DhuhaReports/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\DhuhaReports;
+
+use App\Models\DhuhaReport;
+use App\Models\Institution;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $date = '';
+    public string $institution_id = '';
+
+    public function mount(): void
+    {
+        $this->date = now()->toDateString();
+    }
+
+    public function render()
+    {
+        return view('livewire.dhuha-reports.index', [
+            'reports' => DhuhaReport::with(['teacher', 'institution'])
+                ->whereDate('report_date', $this->date)
+                ->when($this->institution_id, fn ($q) =>
+                    $q->where('institution_id', $this->institution_id)
+                )
+                ->latest()
+                ->paginate(10),
+
+            'institutions' => Institution::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }/*  */
+}
+
+
+==================================================
+FILE: app/Livewire/DhuhaSchedules/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\DhuhaSchedules;
+
+use App\Models\DhuhaSchedule;
+use App\Models\Institution;
+use App\Models\Teacher;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    public string $teacher_id = '';
+    public string $institution_id = '';
+    public string $day = '';
+    public bool $is_active = true;
+
+    public array $days = [
+        'Senin',
+        'Selasa',
+        'Rabu',
+        'Kamis',
+        'Jumat',
+        'Sabtu',
+        'Ahad',
+    ];
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $schedule = DhuhaSchedule::findOrFail($id);
+
+        $this->editingId = $schedule->id;
+        $this->teacher_id = (string) $schedule->teacher_id;
+        $this->institution_id = (string) $schedule->institution_id;
+        $this->day = $schedule->day;
+        $this->is_active = (bool) $schedule->is_active;
+
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $data = $this->validate([
+            'teacher_id' => ['required', 'exists:teachers,id'],
+            'institution_id' => ['nullable', 'exists:institutions,id'],
+            'day' => ['required', 'string'],
+            'is_active' => ['boolean'],
+        ]);
+
+        $data['institution_id'] = $data['institution_id'] ?: null;
+
+        DhuhaSchedule::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+
+        session()->flash('success', 'Jadwal petugas dhuha berhasil disimpan.');
+    }
+
+    public function delete(int $id): void
+    {
+        DhuhaSchedule::findOrFail($id)->delete();
+
+        session()->flash('success', 'Jadwal petugas dhuha berhasil dihapus.');
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->teacher_id = '';
+        $this->institution_id = '';
+        $this->day = '';
+        $this->is_active = true;
+        $this->resetValidation();
+    }
+
+    public function render()
+    {
+        return view('livewire.dhuha-schedules.index', [
+            'schedules' => DhuhaSchedule::with(['teacher', 'institution'])
+                ->latest()
+                ->paginate(10),
+
+            'teachers' => Teacher::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
+
+            'institutions' => Institution::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/FaceAttendance/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\FaceAttendance;
+
+use App\Models\DailyAttendance;
+use App\Models\Teacher;
+use App\Models\TransportSetting;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public string $mode = 'check_in';
+
+    public array $logs = [];
+
+    public function setMode(string $mode): void
+    {
+        if (! in_array($mode, ['check_in', 'check_out'])) {
+            return;
+        }
+
+        $this->mode = $mode;
+    }
+
+    public function saveAttendanceByTeacherId($teacherId, ?string $photoBase64 = null): array
+    {
+        $teacher = Teacher::findOrFail($teacherId);
+        $now = now();
+
+        $attendance = DailyAttendance::firstOrCreate(
+            [
+                'teacher_id' => $teacher->id,
+                'attendance_date' => $now->toDateString(),
+            ],
+            [
+                'status' => 'present',
+                'transport_amount' => 0,
+            ]
+        );
+
+        if ($this->mode === 'check_in') {
+            return $this->saveCheckIn($attendance, $teacher, $now);
+        }
+
+        return $this->saveCheckOut($attendance, $teacher, $now);
+    }
+
+    private function setting(): ?TransportSetting
+    {
+        return TransportSetting::where('is_active', true)->first();
+    }
+
+    private function isBetween(Carbon $now, string $start, string $end): bool
+    {
+        $startTime = Carbon::createFromTimeString($start);
+        $endTime = Carbon::createFromTimeString($end);
+
+        return $now->betweenIncluded($startTime, $endTime);
+    }
+
+    private function saveCheckIn(DailyAttendance $attendance, Teacher $teacher, Carbon $now): array
+    {
+        if ($attendance->check_in_time) {
+            return [
+                'status' => 'already',
+                'type' => 'check_in',
+                'name' => $teacher->name,
+                'message' => $teacher->name . ' sudah absen masuk pukul ' . substr($attendance->check_in_time, 0, 5),
+            ];
+        }
+
+        $setting = $this->setting();
+
+        $isValidCheckIn = false;
+
+        if ($setting) {
+            $isValidCheckIn = $this->isBetween(
+                $now,
+                $setting->check_in_start,
+                $setting->check_in_end
+            );
+        }
+
+        $attendance->update([
+            'attendance_time' => $now->format('H:i:s'),
+            'check_in_time' => $now->format('H:i:s'),
+            'check_in_status' => $isValidCheckIn ? 'ontime' : 'late',
+            'transport_amount' => 0,
+            'note' => $isValidCheckIn
+                ? 'Absen masuk valid. Transport menunggu absen pulang.'
+                : 'Absen masuk di luar waktu transport.',
+        ]);
+
+        $this->addLog($teacher->name, 'Masuk', $now->format('H:i:s'), 0);
+
+        return [
+            'status' => 'success',
+            'type' => 'check_in',
+            'name' => $teacher->name,
+            'transport' => 0,
+            'message' => $teacher->name . ' berhasil absen masuk pukul ' . $now->format('H:i') . '. Transport menunggu absen pulang.',
+        ];
+    }
+
+    private function saveCheckOut(DailyAttendance $attendance, Teacher $teacher, Carbon $now): array
+    {
+        if (! $attendance->check_in_time) {
+            return [
+                'status' => 'no_check_in',
+                'type' => 'check_out',
+                'name' => $teacher->name,
+                'message' => $teacher->name . ' belum absen masuk hari ini.',
+            ];
+        }
+
+        if ($attendance->check_out_time) {
+            return [
+                'status' => 'already',
+                'type' => 'check_out',
+                'name' => $teacher->name,
+                'message' => $teacher->name . ' sudah absen pulang pukul ' . substr($attendance->check_out_time, 0, 5),
+            ];
+        }
+
+        $setting = $this->setting();
+
+        $isValidCheckIn = $attendance->check_in_status === 'ontime';
+        $isValidCheckOut = false;
+        $transportAmount = 0;
+
+        if ($setting) {
+            $isValidCheckOut = $this->isBetween(
+                $now,
+                $setting->check_out_start,
+                $setting->check_out_end
+            );
+
+            if ($isValidCheckIn && $isValidCheckOut) {
+                $transportAmount = (int) $setting->amount;
+            }
+        }
+
+        $attendance->update([
+            'check_out_time' => $now->format('H:i:s'),
+            'check_out_status' => $isValidCheckOut ? 'normal' : 'early',
+            'transport_amount' => $transportAmount,
+            'note' => $transportAmount > 0
+                ? 'Absen masuk dan pulang valid. Mendapat transport.'
+                : 'Transport tidak cair karena absen masuk/pulang tidak sesuai waktu.',
+        ]);
+
+        $this->addLog($teacher->name, 'Pulang', $now->format('H:i:s'), $transportAmount);
+        if ($transportAmount > 0) {
+            \App\Models\AppNotification::create([
+                'teacher_id' => $teacher->id,
+                'title' => 'Transport diterima',
+                'message' => 'Anda mendapatkan transport sebesar Rp ' . number_format($transportAmount, 0, ',', '.') . ' hari ini.',
+                'type' => 'success',
+            ]);
+        }
+        return [
+            'status' => 'success',
+            'type' => 'check_out',
+            'name' => $teacher->name,
+            'checkout_status' => $isValidCheckOut ? 'normal' : 'early',
+            'transport' => $transportAmount,
+            'message' => $teacher->name . ' berhasil absen pulang pukul ' . $now->format('H:i') .
+                '. Transport: Rp' . number_format($transportAmount, 0, ',', '.'),
+        ];
+    }
+
+    private function addLog(string $name, string $type, string $time, int $transport): void
+    {
+        $this->logs = array_slice(array_merge([[
+            'name' => $name,
+            'type' => $type,
+            'time' => $time,
+            'transport' => $transport,
+        ]], $this->logs), 0, 10);
+    }
+
+    public function render()
+    {
+
+        return view('livewire.face-attendance.index', [
+            'teachers' => Teacher::where('is_active', true)
+                ->whereNotNull('face_descriptor')
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }
+
+    private function saveBase64Photo(?string $photoBase64, string $folder): ?string
+    {
+        if (! $photoBase64) {
+            return null;
+        }
+
+        $image = str_replace('data:image/jpeg;base64,', '', $photoBase64);
+        $image = str_replace(' ', '+', $image);
+
+        $fileName = $folder . '/' . uniqid() . '.jpg';
+
+        Storage::disk('public')->put($fileName, base64_decode($image));
+
+        return $fileName;
+    }
+
+    public function mount(): void
+    {
+        $requestedMode = request()->query('mode', 'check_in');
+
+        if (in_array($requestedMode, ['check_in', 'check_out'], true)) {
+            $this->mode = $requestedMode;
+        }
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/FaceEnrollment/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\FaceEnrollment;
+
+use App\Models\Teacher;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public string $teacher_id = '';
+    public string $descriptor = '';
+
+    public function saveFace(): void
+    {
+        $this->validate([
+            'teacher_id' => ['required', 'exists:teachers,id'],
+            'descriptor' => ['required', 'string'],
+        ]);
+
+        Teacher::findOrFail($this->teacher_id)->update([
+            'face_descriptor' => json_decode($this->descriptor, true),
+        ]);
+
+        session()->flash('success', 'Data wajah guru berhasil diregistrasi.');
+
+        $this->teacher_id = '';
+        $this->descriptor = '';
+    }
+
+    public function render()
+    {
+        return view('livewire.face-enrollment.index', [
+            'teachers' => Teacher::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }
+}
+
+==================================================
+FILE: app/Livewire/FinanceDashboard/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\FinanceDashboard;
+
+use App\Models\HonorPayment;
+use App\Models\Institution;
+use App\Models\MonthlyHonor;
+use App\Models\SubjectAttendance;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public int $month;
+    public int $year;
+
+    public function mount(): void
+    {
+        $this->month = now()->month;
+        $this->year = now()->year;
+    }
+
+    public function updatedMonth(): void
+    {
+        //
+    }
+
+    public function updatedYear(): void
+    {
+        //
+    }
+
+    public function render()
+    {
+        $honors = MonthlyHonor::with(['teacher', 'institution', 'payments'])
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->get();
+
+        $totalHonor = (int) $honors->sum('grand_total');
+
+        $totalPaid = (int) HonorPayment::whereHas('monthlyHonor', function ($query) {
+            $query->where('month', $this->month)
+                ->where('year', $this->year);
+        })->sum('amount');
+
+        $totalRemaining = max($totalHonor - $totalPaid, 0);
+
+        $institutionSummaries = Institution::where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->map(function ($institution) use ($honors) {
+                $institutionHonors = $honors->where('institution_id', $institution->id);
+
+                $paid = HonorPayment::whereHas('monthlyHonor', function ($query) use ($institution) {
+                    $query->where('month', $this->month)
+                        ->where('year', $this->year)
+                        ->where('institution_id', $institution->id);
+                })->sum('amount');
+
+                $total = (int) $institutionHonors->sum('grand_total');
+
+
+
+                return [
+                    'institution' => $institution,
+                    'total_honor' => $total,
+                    'total_paid' => (int) $paid,
+                    'total_remaining' => max($total - (int) $paid, 0),
+                    'total_teachers' => $institutionHonors->pluck('teacher_id')->unique()->count(),
+                    'total_records' => $institutionHonors->count(),
+                ];
+            });
+            $runningTeachingHonor = SubjectAttendance::whereMonth('teaching_date', $this->month)
+            ->whereYear('teaching_date', $this->year)
+            ->whereIn('attendance_status', ['present', 'late'])
+            ->sum('teaching_honor');
+
+            $runningHours = SubjectAttendance::whereMonth('teaching_date', $this->month)
+                ->whereYear('teaching_date', $this->year)
+                ->whereIn('attendance_status', ['present', 'late'])
+                ->sum('hours_count');
+
+            $runningByInstitution = Institution::where('is_active', true)
+                ->orderBy('name')
+                ->get()
+                ->map(function ($institution) {
+                    return [
+                        'institution' => $institution,
+                        'running_honor' => SubjectAttendance::where('institution_id', $institution->id)
+                            ->whereMonth('teaching_date', $this->month)
+                            ->whereYear('teaching_date', $this->year)
+                            ->whereIn('attendance_status', ['present', 'late'])
+                            ->sum('teaching_honor'),
+                        'running_hours' => SubjectAttendance::where('institution_id', $institution->id)
+                            ->whereMonth('teaching_date', $this->month)
+                            ->whereYear('teaching_date', $this->year)
+                            ->whereIn('attendance_status', ['present', 'late'])
+                            ->sum('hours_count'),
+                    ];
+                });
+        return view('livewire.finance-dashboard.index', [
+            'totalHonor' => $totalHonor,
+            'totalPaid' => $totalPaid,
+            'totalRemaining' => $totalRemaining,
+            'runningTeachingHonor' => $runningTeachingHonor,
+            'runningHours' => $runningHours,
+            'runningByInstitution' => $runningByInstitution,
+            'totalTeachers' => $honors->pluck('teacher_id')->unique()->count(),
+            'totalRecords' => $honors->count(),
+            'institutionSummaries' => $institutionSummaries,
+            'unpaidHonors' => $honors
+                ->filter(fn ($honor) => $honor->payment_status !== 'paid')
+                ->take(8),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/Kiosk/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\Kiosk;
+
+use App\Models\DailyAttendance;
+use App\Models\Teacher;
+use App\Services\WhatsappService;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public string $mode = 'check_in';
+
+    public function setMode(string $mode): void
+    {
+        if (in_array($mode, ['check_in', 'check_out'])) {
+            $this->mode = $mode;
+        }
+    }
+
+    public function saveAttendanceByTeacherId($teacherId, ?string $photoBase64 = null): array
+    {
+        $teacher = Teacher::findOrFail($teacherId);
+        $now = now();
+
+        $attendance = DailyAttendance::firstOrCreate(
+            [
+                'teacher_id' => $teacher->id,
+                'attendance_date' => $now->toDateString(),
+            ],
+            [
+                'status' => 'present',
+                'transport_amount' => 0,
+            ]
+        );
+
+        if ($this->mode === 'check_in') {
+            return $this->saveCheckIn($attendance, $teacher, $now, $photoBase64);
+        }
+
+        return $this->saveCheckOut($attendance, $teacher, $now, $photoBase64);
+    }
+
+    private function saveCheckIn(
+        DailyAttendance $attendance,
+        Teacher $teacher,
+        Carbon $now,
+        ?string $photoBase64 = null
+    ): array {
+        if ($attendance->check_in_time) {
+            return [
+                'status' => 'already',
+                'type' => 'check_in',
+                'name' => $teacher->name,
+                'message' => 'Sudah absen masuk pukul ' . substr($attendance->check_in_time, 0, 5),
+            ];
+        }
+
+        $start = Carbon::createFromTimeString('06:45:00');
+        $end = Carbon::createFromTimeString('07:15:00');
+
+        $isTransport = $now->betweenIncluded($start, $end);
+
+        $photoPath = $this->saveBase64Photo($photoBase64, 'attendance/check-in');
+
+        $attendance->update([
+            'attendance_time' => $now->format('H:i:s'),
+            'check_in_time' => $now->format('H:i:s'),
+            'check_in_status' => $isTransport ? 'ontime' : 'late',
+            'check_in_photo' => $photoPath,
+            'transport_amount' => $isTransport ? 10000 : 0,
+            'note' => $isTransport
+                ? 'Hadir tepat waktu, mendapat transport.'
+                : 'Hadir di luar waktu transport, hanya menggugurkan kewajiban.',
+        ]);
+
+        $message = "
+                Assalamu'alaikum Wr. Wb.
+
+                Absensi berhasil dicatat.
+
+                Nama :
+                {$teacher->name}
+
+                Tanggal :
+                ".now()->format('d-m-Y')."
+
+                Jam Masuk :
+                ".$now->format('H:i')."
+
+                Status :
+                ".($isTransport ? 'Tepat Waktu' : 'Terlambat')."
+
+                Transport :
+                Rp ".number_format($isTransport ? 10000 : 0,0,',','.')."
+
+                Sistem Absensi Assaidiyyah
+                ";
+
+                if ($teacher->phone) {
+                    WhatsappService::send(
+                        $teacher->phone,
+                        $message
+                    );
+                }
+
+        return [
+            'status' => 'success',
+            'type' => 'check_in',
+            'name' => $teacher->name,
+            'transport' => $isTransport ? 10000 : 0,
+            'photo' => $photoPath,
+            'message' => $isTransport
+                ? 'Transport Rp10.000'
+                : 'Tidak mendapat transport',
+        ];
+    }
+
+    private function saveCheckOut(
+        DailyAttendance $attendance,
+        Teacher $teacher,
+        Carbon $now,
+        ?string $photoBase64 = null
+    ): array {
+        if (! $attendance->check_in_time) {
+            return [
+                'status' => 'no_check_in',
+                'type' => 'check_out',
+                'name' => $teacher->name,
+                'message' => 'Belum absen masuk hari ini.',
+            ];
+        }
+
+        if ($attendance->check_out_time) {
+            return [
+                'status' => 'already',
+                'type' => 'check_out',
+                'name' => $teacher->name,
+                'message' => 'Sudah absen pulang pukul ' . substr($attendance->check_out_time, 0, 5),
+            ];
+        }
+
+        $minimumCheckout = Carbon::createFromTimeString('13:00:00');
+        $isNormal = $now->greaterThanOrEqualTo($minimumCheckout);
+
+        $photoPath = $this->saveBase64Photo($photoBase64, 'attendance/check-out');
+
+        $attendance->update([
+            'check_out_time' => $now->format('H:i:s'),
+            'check_out_status' => $isNormal ? 'normal' : 'early',
+            'check_out_photo' => $photoPath,
+        ]);
+
+        return [
+            'status' => 'success',
+            'type' => 'check_out',
+            'name' => $teacher->name,
+            'checkout_status' => $isNormal ? 'normal' : 'early',
+            'photo' => $photoPath,
+            'message' => 'Absensi pulang berhasil.',
+        ];
+    }
+
+    private function saveBase64Photo(?string $photoBase64, string $folder): ?string
+    {
+        if (! $photoBase64) {
+            return null;
+        }
+
+        if (! str_contains($photoBase64, 'base64,')) {
+            return null;
+        }
+
+        [$meta, $image] = explode('base64,', $photoBase64);
+
+        $image = str_replace(' ', '+', $image);
+
+        $fileName = $folder . '/' . uniqid('attendance_', true) . '.jpg';
+
+        Storage::disk('public')->put($fileName, base64_decode($image));
+
+        return $fileName;
+    }
+
+    public function render()
+    {
+        return view('livewire.kiosk.index', [
+            'teachers' => Teacher::where('is_active', true)
+                ->whereNotNull('face_descriptor')
+                ->orderBy('name')
+                ->get(),
+        ]);
+    }
+}
+
+==================================================
+FILE: app/Livewire/MonthlyHonors/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\MonthlyHonors;
+
+use App\Exports\MonthlyHonorsExport;
+use App\Models\HonorPayment;
+use App\Models\Institution;
+use App\Models\MonthlyHonor;
+use Illuminate\Support\Facades\Artisan;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Maatwebsite\Excel\Facades\Excel;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $institutionId = '';
+    public int $month;
+    public int $year;
+
+    public bool $showPaymentModal = false;
+    public ?int $selectedHonorId = null;
+
+    public string $payment_date = '';
+    public int $payment_amount = 0;
+    public string $payment_method = 'cash';
+    public string $reference_number = '';
+    public string $payment_note = '';
+
+    public array $selectedHonors = [];
+
+    public bool $showBulkPaymentModal = false;
+
+    public string $bulk_payment_date = '';
+
+    public string $bulk_payment_method = 'cash';
+
+    public string $bulk_reference_number = '';
+
+    public string $bulk_payment_note = '';
+
+    public function mount(): void
+    {
+        $this->month = (int) now()->format('m');
+        $this->year = (int) now()->format('Y');
+    }
+
+    public function updatedSearch(): void { $this->resetPage(); }
+    public function updatedMonth(): void { $this->resetPage(); }
+    public function updatedYear(): void { $this->resetPage(); }
+    public function updatedInstitutionId(): void { $this->resetPage(); }
+
+    public function generate(): void
+    {
+        Artisan::call('honor:generate-monthly', [
+            'month' => $this->month,
+            'year' => $this->year,
+        ]);
+
+        session()->flash('success', 'Rekap honor berhasil digenerate.');
+    }
+
+    public function openPaymentModal(int $honorId): void
+    {
+        $honor = MonthlyHonor::with('payments')->findOrFail($honorId);
+
+        $alreadyPaid = (int) $honor->payments()->sum('amount');
+        $remaining = max((int) $honor->grand_total - $alreadyPaid, 0);
+
+        $this->selectedHonorId = $honor->id;
+        $this->payment_date = now()->toDateString();
+        $this->payment_amount = $remaining > 0 ? $remaining : (int) $honor->grand_total;
+        $this->payment_method = 'cash';
+        $this->reference_number = '';
+        $this->payment_note = '';
+        $this->showPaymentModal = true;
+    }
+
+    public function savePayment(): void
+    {
+        $this->validate([
+            'selectedHonorId' => ['required', 'exists:monthly_honors,id'],
+            'payment_date' => ['required', 'date'],
+            'payment_amount' => ['required', 'integer', 'min:1'],
+            'payment_method' => ['required', 'string', 'max:100'],
+            'reference_number' => ['nullable', 'string', 'max:255'],
+            'payment_note' => ['nullable', 'string'],
+        ]);
+
+        HonorPayment::create([
+            'monthly_honor_id' => $this->selectedHonorId,
+            'payment_date' => $this->payment_date,
+            'amount' => $this->payment_amount,
+            'payment_method' => $this->payment_method,
+            'reference_number' => $this->reference_number,
+            'note' => $this->payment_note,
+        ]);
+
+        $honor = MonthlyHonor::findOrFail($this->selectedHonorId);
+        $totalPaid = (int) $honor->payments()->sum('amount');
+
+        $honor->update([
+            'payment_status' => $totalPaid >= $honor->grand_total ? 'paid' : 'partial',
+            'paid_at' => $totalPaid >= $honor->grand_total ? now() : null,
+        ]);
+
+        $this->showPaymentModal = false;
+        $this->resetPaymentForm();
+
+        session()->flash('success', 'Pembayaran honor berhasil disimpan.');
+    }
+
+    public function markAsUnpaid(int $id): void
+    {
+        $honor = MonthlyHonor::findOrFail($id);
+
+        $honor->payments()->delete();
+
+        $honor->update([
+            'payment_status' => 'unpaid',
+            'paid_at' => null,
+        ]);
+
+        session()->flash('success', 'Status pembayaran dikembalikan menjadi belum dibayar.');
+    }
+
+    private function resetPaymentForm(): void
+    {
+        $this->selectedHonorId = null;
+        $this->payment_date = '';
+        $this->payment_amount = 0;
+        $this->payment_method = 'cash';
+        $this->reference_number = '';
+        $this->payment_note = '';
+        $this->resetValidation();
+    }
+
+    public function exportExcel()
+    {
+        return Excel::download(
+            new MonthlyHonorsExport($this->month, $this->year),
+            'rekap-honor-' . $this->month . '-' . $this->year . '.xlsx'
+        );
+    }
+
+    public function render()
+    {
+        $honors = MonthlyHonor::query()
+            ->with(['teacher', 'institution', 'payments'])
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->when($this->institutionId, fn ($query) =>
+                $query->where('institution_id', $this->institutionId)
+            )
+            ->when($this->search, function ($query) {
+                $query->where(function ($q) {
+                    $q->whereHas('teacher', fn ($teacherQuery) =>
+                        $teacherQuery->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('institution', fn ($institutionQuery) =>
+                        $institutionQuery->where('name', 'like', '%' . $this->search . '%')
+                    );
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        $summaryQuery = MonthlyHonor::where('month', $this->month)
+            ->where('year', $this->year)
+            ->when($this->institutionId, fn ($query) =>
+                $query->where('institution_id', $this->institutionId)
+            );
+
+        $totalGrand = (clone $summaryQuery)->sum('grand_total');
+
+        $totalPaid = HonorPayment::whereHas('monthlyHonor', function ($query) {
+            $query->where('month', $this->month)
+                ->where('year', $this->year)
+                ->when($this->institutionId, fn ($q) =>
+                    $q->where('institution_id', $this->institutionId)
+                );
+        })->sum('amount');
+
+        return view('livewire.monthly-honors.index', [
+            'honors' => $honors,
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+
+            'totalGrand' => $totalGrand,
+            'totalPaid' => $totalPaid,
+            'totalRemaining' => max($totalGrand - $totalPaid, 0),
+            'totalTeachers' => (clone $summaryQuery)->count(),
+
+            'totalTransport' => (clone $summaryQuery)->sum('total_transport'),
+            'totalTeachingHonor' => (clone $summaryQuery)->sum('total_teaching_honor'),
+            'totalDeduction' => (clone $summaryQuery)->sum('total_deduction'),
+            'totalAdditionalHonor' => (clone $summaryQuery)->sum('total_additional_honor'),
+        ])->layout('layouts.app');
+    }
+
+    public function openBulkPaymentModal(): void
+    {
+        if (count($this->selectedHonors) === 0) {
+            session()->flash(
+                'success',
+                'Pilih minimal satu rekap honor.'
+            );
+
+            return;
+        }
+
+        $this->bulk_payment_date = now()->toDateString();
+        $this->bulk_payment_method = 'cash';
+        $this->bulk_reference_number = '';
+        $this->bulk_payment_note = '';
+
+        $this->showBulkPaymentModal = true;
+    }
+
+    public function saveBulkPayment(): void
+{
+    foreach ($this->selectedHonors as $honorId) {
+
+        $honor = MonthlyHonor::with('payments')
+            ->find($honorId);
+
+        if (! $honor) {
+            continue;
+        }
+
+        $alreadyPaid = (int) $honor->payments()->sum('amount');
+
+        $remaining = max(
+            (int) $honor->grand_total - $alreadyPaid,
+            0
+        );
+
+        if ($remaining <= 0) {
+            continue;
+        }
+
+        HonorPayment::create([
+            'monthly_honor_id' => $honor->id,
+            'payment_date' => $this->bulk_payment_date,
+            'amount' => $remaining,
+            'payment_method' => $this->bulk_payment_method,
+            'reference_number' => $this->bulk_reference_number,
+            'note' => $this->bulk_payment_note,
+        ]);
+
+        $honor->update([
+            'payment_status' => 'paid',
+            'paid_at' => now(),
+        ]);
+    }
+
+    $this->selectedHonors = [];
+
+    $this->showBulkPaymentModal = false;
+
+    session()->flash(
+        'success',
+        'Pembayaran massal berhasil diproses.'
+    );
+}
+
+public function deleteRecap(): void
+{
+    $honors = MonthlyHonor::where('month', $this->month)
+        ->where('year', $this->year)
+        ->pluck('id');
+
+    HonorPayment::whereIn('monthly_honor_id', $honors)
+        ->delete();
+
+    MonthlyHonor::whereIn('id', $honors)
+        ->delete();
+
+    session()->flash(
+        'success',
+        'Rekap honor dan pembayaran berhasil dihapus.'
+    );
+}
+}
+
+
+==================================================
+FILE: app/Livewire/PicketReports/Create.php
+==================================================
+<?php
+
+namespace App\Livewire\PicketReports;
+
+use App\Models\PicketReport;
+use App\Models\PicketReportStudent;
+use App\Models\Teacher;
+use App\Models\TeacherPicketSchedule;
+use App\Services\WhatsappService;
+use Livewire\Component;
+
+class Create extends Component
+{
+    public string $teacher_absences = '';
+    public string $class_name = '';
+    public string $student_name = '';
+    public string $status = 'alpa';
+
+    public array $students = [];
+
+    public ?Teacher $teacher = null;
+    public bool $isAllowed = false;
+    public string $dayName = '';
+
+    public array $classes = [
+        'Kelas 10',
+        'Kelas 11 Paket 1',
+        'Kelas 11 Paket 2',
+        'Kelas 12 Paket 1',
+        'Kelas 12 Paket 2',
+    ];
+
+    public function mount(): void
+    {
+        $this->teacher = auth()->user()->teacher ?? null;
+        $this->dayName = $this->currentDayName();
+
+        if (! $this->teacher || ! $this->teacher->is_picket_officer) {
+            $this->isAllowed = false;
+            return;
+        }
+
+        $this->isAllowed = TeacherPicketSchedule::where('teacher_id', $this->teacher->id)
+            ->where('day', $this->dayName)
+            ->where('is_active', true)
+            ->exists();
+    }
+
+    private function currentDayName(): string
+    {
+        return [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Ahad',
+        ][now()->format('l')];
+    }
+
+    public function addStudent(): void
+    {
+        $this->validate([
+            'class_name' => ['required', 'string'],
+            'student_name' => ['required', 'string', 'max:255'],
+            'status' => ['required', 'string'],
+        ]);
+
+        $this->students[] = [
+            'class_name' => $this->class_name,
+            'student_name' => $this->student_name,
+            'status' => $this->status,
+        ];
+
+        $this->student_name = '';
+        $this->status = 'alpa';
+    }
+
+    public function removeStudent(int $index): void
+    {
+        unset($this->students[$index]);
+        $this->students = array_values($this->students);
+    }
+
+    public function buildMessage(): string
+    {
+        $date = now()->locale('id')->translatedFormat('l, d F Y');
+        $teacherAbsences = trim($this->teacher_absences) ?: '-';
+
+        $message = "Bismillahirrahmanirrahim...\n\n";
+        $message .= "📅 {$date}\n";
+        $message .= "📌 Guru Piket: {$this->teacher?->name}\n\n";
+        $message .= "🔖 Guru yang berhalangan hadir :\n";
+        $message .= "{$teacherAbsences}\n\n";
+        $message .= "📝 Siswa yang tidak masuk :\n\n";
+
+        foreach ($this->classes as $class) {
+            $message .= "🏘️ {$class}\n";
+
+            $items = collect($this->students)
+                ->where('class_name', $class)
+                ->values();
+
+            if ($items->isEmpty()) {
+                $message .= "Berangkat semua\n\n";
+                continue;
+            }
+
+            foreach ($items as $i => $student) {
+                $no = $i + 1;
+                $message .= "{$no}. {$student['student_name']} ({$student['status']})\n";
+            }
+
+            $message .= "\n";
+        }
+
+        $message .= "🌹 Terima kasih🌹\n\n";
+        $message .= "Absen Online ✅";
+
+        return $message;
+    }
+
+    public function save(): void
+    {
+        if (! $this->isAllowed) {
+            abort(403);
+        }
+
+        $report = PicketReport::updateOrCreate(
+            [
+                'teacher_id' => $this->teacher->id,
+                'report_date' => now()->toDateString(),
+            ],
+            [
+                'teacher_absences' => $this->teacher_absences,
+                'whatsapp_message' => $this->buildMessage(),
+            ]
+        );
+
+        $report->students()->delete();
+
+        foreach ($this->students as $student) {
+            PicketReportStudent::create([
+                'picket_report_id' => $report->id,
+                'class_name' => $student['class_name'],
+                'student_name' => $student['student_name'],
+                'status' => $student['status'],
+            ]);
+        }
+
+        session()->flash('success', 'Laporan piket berhasil disimpan.');
+    }
+
+    public function sendWhatsappGroup(): void
+    {
+        if (! $this->isAllowed) {
+            abort(403);
+        }
+
+        $message = $this->buildMessage();
+
+        $response = WhatsappService::send(
+            env('WA_GROUP_TARGET'),
+            $message
+        );
+
+        if ($response->successful()) {
+            PicketReport::updateOrCreate(
+                [
+                    'teacher_id' => $this->teacher->id,
+                    'report_date' => now()->toDateString(),
+                ],
+                [
+                    'teacher_absences' => $this->teacher_absences,
+                    'whatsapp_message' => $message,
+                    'sent_at' => now(),
+                ]
+            );
+
+            session()->flash('success', 'Laporan berhasil dikirim ke WhatsApp.');
+        } else {
+            session()->flash('error', 'Gagal kirim WhatsApp. Cek token atau target WA.');
+        }
+    }
+
+    public function render()
+    {
+        return view('livewire.picket-reports.create', [
+            'previewMessage' => $this->buildMessage(),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/PicketSchedules/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\PicketSchedules;
+
+use App\Models\Institution;
+use App\Models\Teacher;
+use App\Models\TeacherPicketSchedule;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $teacher_id = '';
+    public string $day = '';
+    public string $start_time = '07:00';
+    public string $end_time = '12:00';
+    public bool $is_active = true;
+    public string $institution_id = '';
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    public array $days = [
+        'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Ahad',
+    ];
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $schedule = TeacherPicketSchedule::findOrFail($id);
+        $this->institution_id = (string) $schedule->institution_id;
+        $this->editingId = $schedule->id;
+        $this->teacher_id = (string) $schedule->teacher_id;
+        $this->day = $schedule->day;
+        $this->start_time = substr($schedule->start_time, 0, 5);
+        $this->end_time = substr($schedule->end_time, 0, 5);
+        $this->is_active = (bool) $schedule->is_active;
+
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+             $data = $this->validate([
+            'institution_id' => ['required', 'exists:institutions,id'],
+            'teacher_id' => ['required', 'exists:teachers,id'],
+            'day' => ['required', 'string'],
+            'start_time' => ['required'],
+            'end_time' => ['required', 'after:start_time'],
+            'is_active' => ['boolean'],
+        ]);
+
+        TeacherPicketSchedule::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
+    public function delete(int $id): void
+    {
+        TeacherPicketSchedule::findOrFail($id)->delete();
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->institution_id = '';
+        $this->teacher_id = '';
+        $this->day = '';
+        $this->start_time = '07:00';
+        $this->end_time = '12:00';
+        $this->is_active = true;
+        $this->resetValidation();
+    }
+
+    public function render()
+    {
+        $schedules = TeacherPicketSchedule::with([
+                        'teacher',
+                        'institution',
+                    ])
+            ->when($this->search, fn ($query) =>
+                $query->whereHas('teacher', fn ($q) =>
+                    $q->where('name', 'like', '%' . $this->search . '%')
+                )
+            )
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.picket-schedules.index', [
+            'schedules' => $schedules,
+            'teachers' => Teacher::where('is_active', true)
+                ->where('is_picket_officer', true)
+                ->orderBy('name')
+                ->get(),
+                'institutions' => Institution::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/PicketSubjectAttendances/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\PicketSubjectAttendances;
+
+use App\Models\SubjectAttendance;
+use App\Models\TeacherHonorPackage;
+use App\Models\TeacherPicketSchedule;
+use App\Models\TeachingSchedule;
+use Illuminate\Support\Facades\Request;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public string $dayName = '';
+    public bool $isAllowed = false;
+
+    public ?int $picketInstitutionId = null;
+    public ?TeacherPicketSchedule $picketSchedule = null;
+
+    public function mount(): void
+    {
+        $teacher = auth()->user()->teacher;
+
+        $this->dayName = $this->currentDayName();
+
+        if (! $teacher || ! $teacher->is_picket_officer) {
+            $this->isAllowed = false;
+            return;
+        }
+
+        $this->picketSchedule = TeacherPicketSchedule::with('institution')
+            ->where('teacher_id', $teacher->id)
+            ->where('day', $this->dayName)
+            ->where('is_active', true)
+            ->first();
+
+        if (! $this->picketSchedule) {
+            $this->isAllowed = false;
+            return;
+        }
+
+        $this->picketInstitutionId = $this->picketSchedule->institution_id;
+        $this->isAllowed = true;
+    }
+
+    private function currentDayName(): string
+    {
+        return [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Ahad',
+        ][now()->format('l')];
+    }
+
+    public function markPicketSubjectAttendance(Request $request)
+{
+    $teacher = $request->user()->teacher;
+
+    $data = $request->validate([
+        'teaching_schedule_id' => ['required', 'exists:teaching_schedules,id'],
+        'status' => ['required', 'in:present,late,permit,sick,absent'],
+    ]);
+
+    $day = [
+        'Monday' => 'Senin',
+        'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu',
+        'Thursday' => 'Kamis',
+        'Friday' => 'Jumat',
+        'Saturday' => 'Sabtu',
+        'Sunday' => 'Ahad',
+    ][now()->format('l')];
+
+    $picketSchedule = TeacherPicketSchedule::where('teacher_id', $teacher->id)
+        ->where('day', $day)
+        ->where('is_active', true)
+        ->first();
+
+    if (! $teacher->is_picket_officer || ! $picketSchedule) {
+        return response()->json([
+            'message' => 'Anda tidak memiliki akses piket hari ini.',
+        ], 403);
+    }
+
+    $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+        ->where('institution_id', $picketSchedule->institution_id)
+        ->findOrFail($data['teaching_schedule_id']);
+
+    $oldAttendance = SubjectAttendance::where([
+        'teacher_id' => $schedule->teacher_id,
+        'subject_id' => $schedule->subject_id,
+        'teaching_schedule_id' => $schedule->id,
+        'teaching_date' => now()->toDateString(),
+    ])->first();
+
+    $oldStatus = $oldAttendance?->attendance_status;
+
+    $isPaid = in_array($data['status'], ['present', 'late']);
+
+    $package = TeacherHonorPackage::where('teacher_id', $schedule->teacher_id)
+        ->where('institution_id', $schedule->institution_id)
+        ->where('is_active', true)
+        ->first();
+
+    $ratePerHour = $package?->deduction_per_hour ?? 0;
+
+    $teachingHonor = $isPaid
+        ? ($schedule->hours_count * $ratePerHour)
+        : 0;
+
+    $attendance = SubjectAttendance::updateOrCreate(
+        [
+            'teacher_id' => $schedule->teacher_id,
+            'subject_id' => $schedule->subject_id,
+            'teaching_schedule_id' => $schedule->id,
+            'teaching_date' => now()->toDateString(),
+        ],
+        [
+            'institution_id' => $schedule->institution_id,
+            'recorded_by_teacher_id' => $teacher->id,
+            'source' => 'android_picket',
+            'attendance_status' => $data['status'],
+            'recorded_at' => now(),
+
+            'start_time' => $schedule->start_time,
+            'end_time' => $schedule->end_time,
+            'hours_count' => $schedule->hours_count,
+            'hourly_rate' => $ratePerHour,
+            'teaching_honor' => $teachingHonor,
+            'class_name' => $schedule->class_name,
+            'status' => $data['status'],
+            'note' => 'Dicatat dari aplikasi Android oleh guru piket: ' . $teacher->name,
+        ]
+    );
+
+    if ($oldStatus !== $data['status']) {
+        $statusText = [
+            'present' => 'Hadir',
+            'late' => 'Terlambat',
+            'permit' => 'Izin',
+            'sick' => 'Sakit',
+            'absent' => 'Alpa',
+        ][$data['status']] ?? $data['status'];
+
+        \App\Models\AppNotification::create([
+            'teacher_id' => $schedule->teacher_id,
+            'title' => 'Absensi mapel dicatat',
+            'message' => 'Status mengajar Anda pada mapel ' .
+                $schedule->subject->name .
+                ' kelas ' .
+                $schedule->class_name .
+                ' dicatat: ' .
+                $statusText .
+                '.',
+            'type' => in_array($data['status'], ['present', 'late'])
+                ? 'success'
+                : 'warning',
+        ]);
+
+        if ($teachingHonor > 0) {
+            \App\Models\AppNotification::create([
+                'teacher_id' => $schedule->teacher_id,
+                'title' => 'Honor berjalan bertambah',
+                'message' => 'Honor mengajar Anda bertambah Rp ' .
+                    number_format($teachingHonor, 0, ',', '.') .
+                    ' dari mapel ' .
+                    $schedule->subject->name .
+                    '.',
+                'type' => 'success',
+            ]);
+        }
+    }
+
+    return response()->json([
+        'message' => 'Absensi mapel berhasil disimpan.',
+        'attendance' => $attendance,
+    ]);
+}
+
+    public function render()
+    {
+        $schedules = collect();
+
+        if ($this->isAllowed && $this->picketInstitutionId) {
+            $schedules = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+                ->where('day', $this->dayName)
+                ->where('institution_id', $this->picketInstitutionId)
+                ->orderBy('start_time')
+                ->get();
+        }
+
+        $attendances = SubjectAttendance::whereDate('teaching_date', now()->toDateString())
+            ->when($this->picketInstitutionId, fn ($query) =>
+                $query->where('institution_id', $this->picketInstitutionId)
+            )
+            ->get()
+            ->keyBy('teaching_schedule_id');
+
+        return view('livewire.picket-subject-attendances.index', [
+            'schedules' => $schedules,
+            'attendances' => $attendances,
+            'picketSchedule' => $this->picketSchedule,
+        ])->layout('layouts.app');
+    }
+
+    public function markAttendance(int $scheduleId, string $status): void
+{
+    $teacher = auth()->user()->teacher;
+
+    $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+        ->where('institution_id', $this->picketInstitutionId)
+        ->findOrFail($scheduleId);
+
+    $isPaid = in_array($status, ['present', 'late']);
+
+    $package = TeacherHonorPackage::where('teacher_id', $schedule->teacher_id)
+        ->where('institution_id', $schedule->institution_id)
+        ->where('is_active', true)
+        ->first();
+
+    $ratePerHour = $package?->deduction_per_hour ?? 0;
+
+    $teachingHonor = $isPaid
+        ? ($schedule->hours_count * $ratePerHour)
+        : 0;
+
+    SubjectAttendance::updateOrCreate(
+        [
+            'teacher_id' => $schedule->teacher_id,
+            'subject_id' => $schedule->subject_id,
+            'teaching_schedule_id' => $schedule->id,
+            'teaching_date' => now()->toDateString(),
+        ],
+        [
+            'institution_id' => $schedule->institution_id,
+            'recorded_by_teacher_id' => $teacher->id,
+            'source' => 'picket',
+            'attendance_status' => $status,
+            'recorded_at' => now(),
+
+            'start_time' => $schedule->start_time,
+            'end_time' => $schedule->end_time,
+            'hours_count' => $schedule->hours_count,
+            'hourly_rate' => $ratePerHour,
+            'teaching_honor' => $teachingHonor,
+            'class_name' => $schedule->class_name,
+            'status' => $status,
+            'note' => 'Dicatat oleh guru piket: '.$teacher->name,
+        ]
+    );
+
+    session()->flash('success', 'Absensi berhasil disimpan.');
+}
+}
+
+
+==================================================
+FILE: app/Livewire/SubjectAttendances/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\SubjectAttendances;
+
+use App\Exports\SubjectAttendancesExport;
+use App\Models\SubjectAttendance;
+use App\Models\TeachingSchedule;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Maatwebsite\Excel\Facades\Excel;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $date = '';
+    public string $teaching_schedule_id = '';
+    public ?int $editingId = null;
+    public bool $showModal = false;
+
+    public function mount(): void
+    {
+        $this->date = now()->toDateString();
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedDate(): void
+    {
+        $this->resetPage();
+    }
+
+    public function create(): void
+    {
+        $this->teaching_schedule_id = '';
+        $this->editingId = null;
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $this->validate([
+            'teaching_schedule_id' => ['required', 'exists:teaching_schedules,id'],
+        ]);
+
+        $schedule = TeachingSchedule::with(['teacher', 'subject', 'institution'])
+            ->findOrFail($this->teaching_schedule_id);
+
+        $teachingHonor = $schedule->hours_count * $schedule->teacher->hourly_rate;
+
+        SubjectAttendance::updateOrCreate(
+            [
+                'institution_id' => $schedule->institution_id,
+                'teacher_id' => $schedule->teacher_id,
+                'subject_id' => $schedule->subject_id,
+                'teaching_schedule_id' => $schedule->id,
+                'teaching_date' => now()->toDateString(),
+            ],
+            [
+                'start_time' => $schedule->start_time,
+                'end_time' => $schedule->end_time,
+                'hours_count' => $schedule->hours_count,
+                'hourly_rate' => $schedule->teacher->hourly_rate,
+                'teaching_honor' => $teachingHonor,
+                'class_name' => $schedule->class_name,
+                'status' => 'present',
+                'note' => 'Hadir mengajar mata pelajaran.',
+            ]
+        );
+
+        $this->showModal = false;
+        $this->teaching_schedule_id = '';
+    }
+
+    public function delete(int $id): void
+    {
+        SubjectAttendance::findOrFail($id)->delete();
+    }
+
+    public function render()
+    {
+        $attendances = SubjectAttendance::query()
+            ->with(['teacher', 'subject'])
+            ->when($this->date, fn ($query) =>
+                $query->whereDate('teaching_date', $this->date)
+            )
+            ->when($this->search, function ($query) {
+                $query->where('class_name', 'like', '%' . $this->search . '%')
+                    ->orWhereHas('teacher', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('subject', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    );
+            })
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.subject-attendances.index', [
+            'attendances' => $attendances,
+            'schedules' => TeachingSchedule::with(['teacher', 'subject'])
+                ->latest()
+                ->get(),
+        ])->layout('layouts.app');
+    }
+
+    public function exportExcel()
+{
+    return Excel::download(
+        new SubjectAttendancesExport($this->date),
+        'absensi-mapel-' . $this->date . '.xlsx'
+    );
+}
+}
+
+
+==================================================
+FILE: app/Livewire/Subjects/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\Subjects;
+
+use App\Models\Subject;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $name = '';
+    public ?int $editingId = null;
+    public bool $showModal = false;
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $subject = Subject::findOrFail($id);
+
+        $this->editingId = $subject->id;
+        $this->name = $subject->name;
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $this->validate([
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+
+        Subject::updateOrCreate(
+            ['id' => $this->editingId],
+            ['name' => $this->name]
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
+    public function delete(int $id): void
+    {
+        Subject::findOrFail($id)->delete();
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->name = '';
+        $this->resetValidation();
+    }
+
+public function render()
+{
+    $subjects = Subject::query()
+        ->when($this->search, fn ($query) =>
+            $query->where('name', 'like', '%' . $this->search . '%')
+        )
+        ->latest()
+        ->paginate(10);
+
+    return view('livewire.subjects.index', [
+        'subjects' => $subjects,
+    ])->layout('layouts.app');
+}
+}
+
+==================================================
+FILE: app/Livewire/TeacherHonorPackages/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherHonorPackages;
+
+use App\Models\Institution;
+use App\Models\Teacher;
+use App\Models\TeacherHonorPackage;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+
+    public string $institutionId = '';
+    public string $teacherId = '';
+
+    public int $weeklyHours = 0;
+    public int $packageRate = 0;
+    public int $monthlyHonor = 0;
+    public int $deductionPerHour = 0;
+
+    public bool $isActive = true;
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    public function updated($property): void
+    {
+        if (in_array($property, ['weeklyHours', 'packageRate'])) {
+            $this->calculateHonor();
+        }
+    }
+
+    private function calculateHonor(): void
+    {
+        $weeklyHours = (int) ($this->weeklyHours ?? 0);
+        $packageRate = (int) ($this->packageRate ?? 0);
+
+        $this->monthlyHonor = $weeklyHours * $packageRate;
+
+        $monthlyHours = $weeklyHours * 4;
+
+        $this->deductionPerHour = $monthlyHours > 0
+            ? (int) round($this->monthlyHonor / $monthlyHours)
+            : 0;
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $package = TeacherHonorPackage::findOrFail($id);
+
+        $this->editingId = $package->id;
+        $this->institutionId = (string) $package->institution_id;
+        $this->teacherId = (string) $package->teacher_id;
+        $this->weeklyHours = (int) $package->weekly_hours;
+        $this->packageRate = (int) $package->package_rate;
+        $this->monthlyHonor = (int) $package->monthly_honor;
+        $this->deductionPerHour = (int) $package->deduction_per_hour;
+        $this->isActive = (bool) $package->is_active;
+
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $this->calculateHonor();
+
+        $this->validate([
+            'institutionId' => ['required', 'exists:institutions,id'],
+            'teacherId' => ['required', 'exists:teachers,id'],
+            'weeklyHours' => ['required', 'integer', 'min:1'],
+            'packageRate' => ['required', 'integer', 'min:0'],
+            'isActive' => ['boolean'],
+        ]);
+
+        TeacherHonorPackage::updateOrCreate(
+            ['id' => $this->editingId],
+            [
+                'institution_id' => $this->institutionId,
+                'teacher_id' => $this->teacherId,
+                'weekly_hours' => $this->weeklyHours,
+                'package_rate' => $this->packageRate,
+                'monthly_honor' => $this->monthlyHonor,
+                'deduction_per_hour' => $this->deductionPerHour,
+                'is_active' => $this->isActive,
+            ]
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+
+        session()->flash('success', 'Paket honor guru berhasil disimpan.');
+    }
+
+    public function delete(int $id): void
+    {
+        TeacherHonorPackage::findOrFail($id)->delete();
+
+        session()->flash('success', 'Paket honor guru berhasil dihapus.');
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->institutionId = '';
+        $this->teacherId = '';
+        $this->weeklyHours = 0;
+        $this->packageRate = 0;
+        $this->monthlyHonor = 0;
+        $this->deductionPerHour = 0;
+        $this->isActive = true;
+        $this->resetValidation();
+    }
+
+    public function render()
+    {
+        $packages = TeacherHonorPackage::with(['teacher', 'institution'])
+            ->when($this->search, function ($query) {
+                $query->whereHas('teacher', function ($teacherQuery) {
+                    $teacherQuery->where('name', 'like', '%' . $this->search . '%');
+                })
+                ->orWhereHas('institution', function ($institutionQuery) {
+                    $institutionQuery->where('name', 'like', '%' . $this->search . '%');
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.teacher-honor-packages.index', [
+            'packages' => $packages,
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+            'teachers' => Teacher::where('is_active', true)
+                        ->when($this->institutionId, function ($query) {
+                            $query->whereHas('institutions', function ($q) {
+                                $q->where('institutions.id', $this->institutionId);
+                            });
+                        })
+                        ->orderBy('name')
+                        ->get(),
+        ])->layout('layouts.app');
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacherId = '';
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TeacherPortal/Attendances.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use App\Models\DailyAttendance;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Attendances extends Component
+{
+    use WithPagination;
+
+    public string $month;
+    public string $year;
+
+    public function mount(): void
+    {
+        $this->month = now()->format('m');
+        $this->year = now()->format('Y');
+    }
+
+    public function render()
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun ini belum terhubung dengan data guru.');
+        }
+
+        $attendances = DailyAttendance::where('teacher_id', $teacher->id)
+            ->whereMonth('attendance_date', $this->month)
+            ->whereYear('attendance_date', $this->year)
+            ->latest('attendance_date')
+            ->paginate(10);
+
+        return view('livewire.teacher-portal.attendances', [
+            'teacher' => $teacher,
+            'attendances' => $attendances,
+        ])->layout('layouts.app');
+    }
+}
+
+==================================================
+FILE: app/Livewire/TeacherPortal/Dashboard.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use App\Models\DailyAttendance;
+use App\Models\MonthlyHonor;
+use App\Models\SubjectAttendance;
+use App\Models\TeachingSchedule;
+use App\Models\TeacherPicketSchedule;
+use Livewire\Component;
+
+class Dashboard extends Component
+{
+    public function render()
+    {
+        $user = auth()->user();
+        $teacher = $user->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun ini belum terhubung dengan data guru.');
+        }
+
+        $today = now()->toDateString();
+        $month = now()->month;
+        $year = now()->year;
+
+        $todayAttendance = DailyAttendance::where('teacher_id', $teacher->id)
+            ->whereDate('attendance_date', $today)
+            ->first();
+
+        $monthlyHonor = MonthlyHonor::where('teacher_id', $teacher->id)
+            ->where('month', $month)
+            ->where('year', $year)
+            ->first();
+
+        $teachingToday = SubjectAttendance::with('subject')
+            ->where('teacher_id', $teacher->id)
+            ->whereDate('teaching_date', $today)
+            ->latest()
+            ->get();
+
+        $schedules = TeachingSchedule::with('subject')
+            ->where('teacher_id', $teacher->id)
+            ->orderBy('day')
+            ->get();
+
+        $todayName = now()->locale('id')->translatedFormat('l');
+
+        $picketScheduleToday = TeacherPicketSchedule::where('teacher_id', $teacher->id)
+            ->where('day', $todayName)
+            ->where('is_active', true)
+            ->first();
+
+        return view('livewire.teacher-portal.dashboard', [
+            'teacher' => $teacher,
+            'todayAttendance' => $todayAttendance,
+            'monthlyHonor' => $monthlyHonor,
+            'teachingToday' => $teachingToday,
+            'schedules' => $schedules,
+            'picketScheduleToday' => $picketScheduleToday,
+        ])->layout('layouts.app');
+    }
+}
+
+==================================================
+FILE: app/Livewire/TeacherPortal/DhuhaReport.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use App\Models\DhuhaReport as DhuhaReportModel;
+use App\Models\DhuhaSchedule;
+use App\Models\Teacher;
+use Livewire\Component;
+
+class DhuhaReport extends Component
+{
+    public string $status = 'done';
+    public array $present_teacher_ids = [];
+    public string $note = '';
+    public string $searchTeacher = '';
+
+    public ?DhuhaSchedule $todaySchedule = null;
+    public ?DhuhaReportModel $existingReport = null;
+
+    public function mount(): void
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun belum terhubung dengan data guru.');
+        }
+
+        $this->todaySchedule = DhuhaSchedule::with('teacher')
+            ->where('teacher_id', $teacher->id)
+            ->where('day', $this->currentDayName())
+            ->where('is_active', true)
+            ->first();
+
+        if ($this->todaySchedule) {
+            $this->existingReport = DhuhaReportModel::where('teacher_id', $teacher->id)
+                ->whereNull('institution_id')
+                ->whereDate('report_date', now()->toDateString())
+                ->first();
+
+            if ($this->existingReport) {
+                $this->status = $this->existingReport->status;
+                $this->present_teacher_ids = $this->existingReport->present_teacher_ids ?? [];
+                $this->note = (string) $this->existingReport->note;
+            }
+        }
+    }
+
+    private function currentDayName(): string
+    {
+        return [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Ahad',
+        ][now()->format('l')];
+    }
+
+    public function whatsappMessage(): string
+    {
+        $teacher = auth()->user()->teacher;
+
+        $presentTeachers = Teacher::whereIn('id', $this->present_teacher_ids)
+            ->orderBy('name')
+            ->get();
+
+        $teacherList = $presentTeachers->isNotEmpty()
+            ? $presentTeachers->values()->map(
+                fn ($item, $index) => ($index + 1) . '. ' . $item->name
+            )->implode("\n")
+            : '-';
+
+        $statusText = $this->status === 'done'
+            ? 'Terlaksana'
+            : 'Tidak Terlaksana';
+
+        return "📢 *LAPORAN SHOLAT DHUHA*\n\n"
+            . "Assalamu’alaikum Wr. Wb.\n\n"
+            . "Hari/Tanggal : " . now()->locale('id')->translatedFormat('l, d F Y') . "\n"
+            . "Pelapor      : {$teacher?->name}\n"
+            . "Status       : {$statusText}\n\n"
+            . "*Guru Hadir:*\n"
+            . "{$teacherList}\n\n"
+            . "Jumlah Hadir : " . $presentTeachers->count() . " guru\n\n"
+            . "Keterangan:\n"
+            . ($this->note ?: '-') . "\n\n"
+            . "Wassalamu’alaikum Wr. Wb.";
+    }
+
+    public function save(): void
+    {
+        if (! $this->todaySchedule) {
+            abort(403, 'Anda tidak mendapat jadwal laporan dhuha hari ini.');
+        }
+
+        $this->validate([
+            'status' => ['required', 'in:done,not_done'],
+            'present_teacher_ids' => ['array'],
+            'present_teacher_ids.*' => ['exists:teachers,id'],
+            'note' => ['nullable', 'string'],
+        ]);
+
+        $teacher = auth()->user()->teacher;
+        $message = $this->whatsappMessage();
+
+        $this->existingReport = DhuhaReportModel::updateOrCreate(
+            [
+                'teacher_id' => $teacher->id,
+                'institution_id' => null,
+                'report_date' => now()->toDateString(),
+            ],
+            [
+                'status' => $this->status,
+                'present_teacher_ids' => $this->present_teacher_ids,
+                'teacher_count' => count($this->present_teacher_ids),
+                'imam_name' => null,
+                'note' => $this->note,
+                'whatsapp_message' => $message,
+            ]
+        );
+
+        session()->flash('success', 'Laporan dhuha berhasil disimpan.');
+    }
+
+    public function render()
+    {
+        $teachers = Teacher::where('is_active', true)
+            ->when($this->searchTeacher, function ($query) {
+                $query->where('name', 'like', '%' . $this->searchTeacher . '%');
+            })
+            ->orderBy('name')
+            ->get();
+
+        return view('livewire.teacher-portal.dhuha-report', [
+            'teachers' => $teachers,
+            'waMessage' => $this->whatsappMessage(),
+            'waUrl' => 'https://wa.me/?text=' . urlencode($this->whatsappMessage()),
+            'indonesianDate' => now()->locale('id')->translatedFormat('l, d F Y'),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TeacherPortal/Honors.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use App\Models\AdditionalHonor;
+use App\Models\DailyAttendance;
+use App\Models\MonthlyHonor;
+use App\Models\SubjectAttendance;
+use Livewire\Component;
+
+class Honors extends Component
+{
+    public int $month;
+    public int $year;
+
+    public function mount(): void
+    {
+        $this->month = now()->month;
+        $this->year = now()->year;
+    }
+
+    public function render()
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun ini belum terhubung dengan data guru.');
+        }
+
+        $honors = MonthlyHonor::with(['institution', 'payments'])
+            ->where('teacher_id', $teacher->id)
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->get();
+
+        $honor = $honors->first();
+
+        $subjectAttendances = SubjectAttendance::with(['subject', 'institution'])
+            ->where('teacher_id', $teacher->id)
+            ->whereMonth('teaching_date', $this->month)
+            ->whereYear('teaching_date', $this->year)
+            ->latest('teaching_date')
+            ->get();
+
+        $runningTeachingHonor = $subjectAttendances
+            ->whereIn('attendance_status', ['present', 'late'])
+            ->sum('teaching_honor');
+
+        $runningHours = $subjectAttendances
+            ->whereIn('attendance_status', ['present', 'late'])
+            ->sum('hours_count');
+
+        $additionalHonors = AdditionalHonor::with('institution')
+            ->where('teacher_id', $teacher->id)
+            ->where('month', $this->month)
+            ->where('year', $this->year)
+            ->latest()
+            ->get();
+        $runningTransport = DailyAttendance::where('teacher_id', $teacher->id)
+                        ->whereMonth('attendance_date', $this->month)
+                        ->whereYear('attendance_date', $this->year)
+                        ->sum('transport_amount');
+        return view('livewire.teacher-portal.honors', [
+            'teacher' => $teacher,
+            'honor' => $honor,
+            'honors' => $honors,
+            'subjectAttendances' => $subjectAttendances,
+            'additionalHonors' => $additionalHonors,
+            'runningTeachingHonor' => $runningTeachingHonor,
+            'runningHours' => $runningHours,
+            'totalHonor' => $honors->sum('grand_total'),
+            'runningTransport' => $runningTransport,
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TeacherPortal/Profile.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use Illuminate\Support\Facades\Hash;
+use Livewire\Component;
+use Livewire\WithFileUploads;
+
+class Profile extends Component
+{
+    use WithFileUploads;
+
+    public $name;
+    public $email;
+    public $phone;
+    public $address;
+    public $bio;
+    public $photo;
+
+    public $newPassword;
+    public $newPasswordConfirmation;
+
+    public function mount()
+    {
+        $teacher = auth()->user()->teacher;
+
+        $this->name = $teacher->name;
+        $this->email = auth()->user()->email;
+        $this->phone = $teacher->phone;
+        $this->address = $teacher->address;
+        $this->bio = $teacher->bio;
+    }
+
+    public function save()
+    {
+        $user = auth()->user();
+        $teacher = $user->teacher;
+
+        $this->validate([
+            'name' => 'required',
+            'email' => 'required|email',
+        ]);
+
+        if ($this->photo) {
+
+            $fileName = time() . '.'.$this->photo->extension();
+
+            $this->photo->storeAs(
+                'uploads/teachers',
+                $fileName,
+                'public'
+            );
+
+            $teacher->photo = 'storage/uploads/teachers/'.$fileName;
+        }
+
+        $teacher->update([
+            'name' => $this->name,
+            'phone' => $this->phone,
+            'address' => $this->address,
+            'bio' => $this->bio,
+            'photo' => $teacher->photo,
+        ]);
+
+        $user->update([
+            'email' => $this->email,
+        ]);
+
+        if ($this->newPassword) {
+
+            $this->validate([
+                'newPassword' => 'min:6|same:newPasswordConfirmation'
+            ]);
+
+            $user->update([
+                'password' => Hash::make($this->newPassword),
+            ]);
+        }
+
+        session()->flash(
+            'success',
+            'Profil berhasil diperbarui.'
+        );
+    }
+
+    public function render()
+    {
+        return view('livewire.teacher-portal.profile')
+            ->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TeacherPortal/Schedules.php
+==================================================
+<?php
+
+namespace App\Livewire\TeacherPortal;
+
+use App\Models\TeachingSchedule;
+use Livewire\Component;
+
+class Schedules extends Component
+{
+    public string $day = '';
+
+    public array $days = [
+        'Senin',
+        'Selasa',
+        'Rabu',
+        'Kamis',
+        'Jumat',
+        'Sabtu',
+        'Ahad',
+    ];
+
+    public function render()
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (! $teacher) {
+            abort(403, 'Akun ini belum terhubung dengan data guru.');
+        }
+
+        $schedules = TeachingSchedule::with('subject')
+            ->where('teacher_id', $teacher->id)
+            ->when($this->day, fn ($query) =>
+                $query->where('day', $this->day)
+            )
+            ->orderBy('start_time')
+            ->get();
+
+        return view('livewire.teacher-portal.schedules', [
+            'teacher' => $teacher,
+            'schedules' => $schedules,
+        ])->layout('layouts.app');
+    }
+}
+
+==================================================
+FILE: app/Livewire/Teachers/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\Teachers;
+
+use App\Models\Institution;
+use App\Models\Teacher;
+use Illuminate\Contracts\View\View;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    public string $name = '';
+    public string $nip = '';
+    public string $phone = '';
+    public int $hourly_rate = 25000;
+    public bool $is_active = true;
+    public bool $is_picket_officer = false;
+
+    public array $institution_ids = [];
+
+    protected string $paginationTheme = 'tailwind';
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $teacher = Teacher::with('institutions')->findOrFail($id);
+
+        $this->editingId = $teacher->id;
+        $this->name = $teacher->name;
+        $this->nip = $teacher->nip ?? '';
+        $this->phone = $teacher->phone ?? '';
+        $this->hourly_rate = (int) $teacher->hourly_rate;
+        $this->is_active = (bool) $teacher->is_active;
+        $this->is_picket_officer = (bool) $teacher->is_picket_officer;
+
+        $this->institution_ids = $teacher->institutions
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->toArray();
+
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $data = $this->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'nip' => ['nullable', 'string', 'max:100'],
+            'phone' => ['nullable', 'string', 'max:50'],
+            'hourly_rate' => ['required', 'integer', 'min:0'],
+            'is_active' => ['boolean'],
+            'is_picket_officer' => ['boolean'],
+            'institution_ids' => ['array'],
+            'institution_ids.*' => ['exists:institutions,id'],
+        ]);
+
+        $institutionIds = $data['institution_ids'] ?? [];
+
+        unset($data['institution_ids']);
+
+        $teacher = Teacher::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $teacher->institutions()->sync($institutionIds);
+
+        $this->showModal = false;
+        $this->resetForm();
+
+        $this->dispatch('success', message: 'Data guru berhasil disimpan.');
+    }
+
+    public function delete(int $id): void
+    {
+        $teacher = Teacher::findOrFail($id);
+
+        $teacher->institutions()->detach();
+        $teacher->delete();
+
+        $this->resetPage();
+
+        $this->dispatch('success', message: 'Data guru berhasil dihapus.');
+    }
+
+    public function closeModal(): void
+    {
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->name = '';
+        $this->nip = '';
+        $this->phone = '';
+        $this->hourly_rate = 25000;
+        $this->is_active = true;
+        $this->is_picket_officer = false;
+        $this->institution_ids = [];
+
+        $this->resetValidation();
+    }
+
+    public function render(): View
+    {
+        $teachers = Teacher::query()
+            ->with('institutions')
+            ->when(trim($this->search) !== '', function ($query) {
+                $search = '%' . trim($this->search) . '%';
+
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', $search)
+                        ->orWhere('nip', 'like', $search)
+                        ->orWhere('phone', 'like', $search);
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.teachers.index', [
+            'teachers' => $teachers,
+            'institutions' => Institution::query()
+                ->orderBy('name')
+                ->get(),
+        ])->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TeachingSchedules/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\TeachingSchedules;
+
+use App\Models\Institution;
+use App\Models\Subject;
+use App\Models\Teacher;
+use App\Models\TeachingSchedule;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+    public string $day = '';
+
+    public string $institution_id = '';
+    public string $teacher_id = '';
+    public string $subject_id = '';
+    public string $class_name = '';
+    public string $start_time = '';
+    public string $end_time = '';
+    public int $hours_count = 1;
+
+    public ?int $editingId = null;
+    public bool $showModal = false;
+    public bool $showBulkModal = false;
+
+    public string $bulk_day = '';
+
+    public string $bulk_teacher_id = '';
+
+    public array $scheduleRows = [];
+    public array $days = [
+        'Senin',
+        'Selasa',
+        'Rabu',
+        'Kamis',
+        'Jumat',
+        'Sabtu',
+        'Ahad',
+    ];
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedDay(): void
+    {
+        $this->resetPage();
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function createBulk(): void
+    {
+        $this->bulk_day = '';
+        $this->bulk_teacher_id = '';
+
+        $this->scheduleRows = [
+            [
+                'institution_id' => '',
+                'subject_id' => '',
+                'class_name' => '',
+                'start_time' => '',
+                'end_time' => '',
+                'hours_count' => 1,
+            ]
+        ];
+
+        $this->showBulkModal = true;
+    }
+
+    public function addRow(): void
+    {
+        $this->scheduleRows[] = [
+            'institution_id' => '',
+            'subject_id' => '',
+            'class_name' => '',
+            'start_time' => '',
+            'end_time' => '',
+            'hours_count' => 1,
+        ];
+    }
+
+    public function saveBulk(): void
+    {
+        $this->validate([
+            'bulk_teacher_id' => [
+                'required',
+                'exists:teachers,id'
+            ],
+
+            'bulk_day' => [
+                'required'
+            ],
+        ]);
+
+        foreach ($this->scheduleRows as $row) {
+
+            TeachingSchedule::create([
+                'institution_id' => $row['institution_id'],
+                'teacher_id' => $this->bulk_teacher_id,
+                'subject_id' => $row['subject_id'],
+                'class_name' => $row['class_name'],
+                'day' => $this->bulk_day,
+                'start_time' => $row['start_time'],
+                'end_time' => $row['end_time'],
+                'hours_count' => $row['hours_count'],
+            ]);
+        }
+
+        $this->showBulkModal = false;
+
+        session()->flash(
+            'success',
+            'Jadwal massal berhasil disimpan.'
+        );
+    }
+
+    public function removeRow(int $index): void
+    {
+        unset($this->scheduleRows[$index]);
+
+        $this->scheduleRows = array_values(
+            $this->scheduleRows
+        );
+    }
+
+    public function edit(int $id): void
+    {
+        $schedule = TeachingSchedule::findOrFail($id);
+
+        $this->editingId = $schedule->id;
+        $this->institution_id = (string) $schedule->institution_id;
+        $this->teacher_id = (string) $schedule->teacher_id;
+        $this->subject_id = (string) $schedule->subject_id;
+        $this->class_name = $schedule->class_name;
+        $this->day = $schedule->day;
+        $this->start_time = substr($schedule->start_time, 0, 5);
+        $this->end_time = substr($schedule->end_time, 0, 5);
+        $this->hours_count = (int) $schedule->hours_count;
+
+        $this->showModal = true;
+
+    }
+
+    public function save(): void
+    {
+        $data = $this->validate([
+            'institution_id' => ['required', 'exists:institutions,id'],
+            'teacher_id' => ['required', 'exists:teachers,id'],
+            'subject_id' => ['required', 'exists:subjects,id'],
+            'class_name' => ['required', 'string', 'max:100'],
+            'day' => ['required', 'string', 'max:20'],
+            'start_time' => ['required'],
+            'end_time' => ['required', 'after:start_time'],
+            'hours_count' => ['required', 'integer', 'min:1'],
+        ]);
+
+        TeachingSchedule::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+
+        session()->flash('success', 'Jadwal mengajar berhasil disimpan.');
+    }
+
+    public function delete(int $id): void
+    {
+        TeachingSchedule::findOrFail($id)->delete();
+
+        session()->flash('success', 'Jadwal mengajar berhasil dihapus.');
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->institution_id = '';
+        $this->teacher_id = '';
+        $this->subject_id = '';
+        $this->class_name = '';
+        $this->day = '';
+        $this->start_time = '';
+        $this->end_time = '';
+        $this->hours_count = 1;
+        $this->resetValidation();
+    }
+
+    public function render()
+    {
+        $schedules = TeachingSchedule::query()
+            ->with(['institution', 'teacher', 'subject'])
+            ->when($this->search, function ($query) {
+                $query->where('class_name', 'like', '%' . $this->search . '%')
+                    ->orWhereHas('teacher', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('subject', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    )
+                    ->orWhereHas('institution', fn ($q) =>
+                        $q->where('name', 'like', '%' . $this->search . '%')
+                    );
+            })
+            ->when($this->day, fn ($query) =>
+                $query->where('day', $this->day)
+            )
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.teaching-schedules.index', [
+            'schedules' => $schedules,
+            'institutions' => Institution::where('is_active', true)->orderBy('name')->get(),
+            'teachers' => Teacher::where('is_active', true)
+                        ->when($this->institution_id, function ($query) {
+                            $query->whereHas('institutions', function ($q) {
+                                $q->where('institutions.id', $this->institution_id);
+                            });
+                        })
+                        ->orderBy('name')
+                        ->get(),
+            'subjects' => Subject::orderBy('name')->get(),
+        ])->layout('layouts.app');
+    }
+
+    public function updatedInstitutionId(): void
+    {
+        $this->teacher_id = '';
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/TransportSettings/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\TransportSettings;
+
+use App\Models\TransportSetting;
+use Livewire\Component;
+
+class Index extends Component
+{
+    public string $check_in_start = '06:45';
+    public string $check_in_end = '07:15';
+    public string $check_out_start = '12:45';
+    public string $check_out_end = '13:15';
+    public int $amount = 0;
+    public bool $is_active = true;
+
+    public function mount(): void
+    {
+        $setting = TransportSetting::first();
+
+        if ($setting) {
+            $this->check_in_start = substr($setting->check_in_start, 0, 5);
+            $this->check_in_end = substr($setting->check_in_end, 0, 5);
+            $this->check_out_start = substr($setting->check_out_start, 0, 5);
+            $this->check_out_end = substr($setting->check_out_end, 0, 5);
+            $this->amount = (int) $setting->amount;
+            $this->is_active = (bool) $setting->is_active;
+        }
+    }
+
+    public function save(): void
+    {
+        $data = $this->validate([
+            'check_in_start' => ['required'],
+            'check_in_end' => ['required', 'after:check_in_start'],
+            'check_out_start' => ['required'],
+            'check_out_end' => ['required', 'after:check_out_start'],
+            'amount' => ['required', 'integer', 'min:0'],
+            'is_active' => ['boolean'],
+        ]);
+
+        TransportSetting::updateOrCreate(
+            ['id' => 1],
+            $data
+        );
+
+        session()->flash('success', 'Pengaturan transport berhasil disimpan.');
+    }
+
+    public function render()
+    {
+        return view('livewire.transport-settings.index')
+            ->layout('layouts.app');
+    }
+}
+
+
+==================================================
+FILE: app/Livewire/Users/Index.php
+==================================================
+<?php
+
+namespace App\Livewire\Users;
+
+use App\Models\Teacher;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+use Livewire\Component;
+use Livewire\WithPagination;
+
+class Index extends Component
+{
+    use WithPagination;
+
+    public string $search = '';
+
+    public string $name = '';
+    public string $email = '';
+    public string $password = '';
+    public string $role = 'admin';
+    public string $teacher_id = '';
+
+    public bool $showModal = false;
+    public ?int $editingId = null;
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function create(): void
+    {
+        $this->resetForm();
+        $this->showModal = true;
+    }
+
+    public function edit(int $id): void
+    {
+        $user = User::findOrFail($id);
+
+        $this->editingId = $user->id;
+        $this->name = $user->name;
+        $this->email = $user->email;
+        $this->role = $user->role ?? 'admin';
+        $this->teacher_id = $user->teacher_id ? (string) $user->teacher_id : '';
+        $this->password = '';
+
+        $this->showModal = true;
+    }
+
+    public function save(): void
+    {
+        $rules = [
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $this->editingId],
+            'role' => ['required', 'in:admin,guru'],
+            'teacher_id' => ['nullable', 'exists:teachers,id'],
+        ];
+
+        if ($this->editingId) {
+            $rules['password'] = ['nullable', 'string', 'min:6'];
+        } else {
+            $rules['password'] = ['required', 'string', 'min:6'];
+        }
+
+        $data = $this->validate($rules);
+
+        if ($this->role === 'admin') {
+            $data['teacher_id'] = null;
+        }
+
+        if (! empty($this->password)) {
+            $data['password'] = Hash::make($this->password);
+        } else {
+            unset($data['password']);
+        }
+
+        User::updateOrCreate(
+            ['id' => $this->editingId],
+            $data
+        );
+
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
+    public function delete(int $id): void
+    {
+        if (auth()->id() === $id) {
+            session()->flash('error', 'User yang sedang login tidak bisa dihapus.');
+            return;
+        }
+
+        User::findOrFail($id)->delete();
+    }
+
+    private function resetForm(): void
+    {
+        $this->editingId = null;
+        $this->name = '';
+        $this->email = '';
+        $this->password = '';
+        $this->role = 'admin';
+        $this->teacher_id = '';
+        $this->resetValidation();
+    }
+
+    public function render()
+    {
+        $users = User::with('teacher')
+            ->when($this->search, function ($query) {
+                $query->where(function ($q) {
+                    $q->where('name', 'like', '%' . $this->search . '%')
+                        ->orWhere('email', 'like', '%' . $this->search . '%')
+                        ->orWhere('role', 'like', '%' . $this->search . '%');
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        return view('livewire.users.index', [
+            'users' => $users,
+            'teachers' => Teacher::where('is_active', true)->orderBy('name')->get(),
+        ])->layout('layouts.app');
+    }
+}
