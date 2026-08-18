@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DailyAttendancePdfController;
 use App\Http\Controllers\HonorPaymentReceiptController;
 use App\Http\Controllers\HonorPdfController;
@@ -51,13 +50,8 @@ Route::get('/', function () {
 
 /*
 |--------------------------------------------------------------------------
-| Jembatan Sesi Admin Android
+| Jembatan Admin Android
 |--------------------------------------------------------------------------
-|
-| Route ini harus berada di luar middleware auth.
-| Flutter membuka signed URL ini, kemudian controller membuat sesi login
-| web Laravel dan mengarahkan admin ke halaman scan atau registrasi wajah.
-|
 */
 
 Route::get(
@@ -69,29 +63,11 @@ Route::get(
 
 /*
 |--------------------------------------------------------------------------
-| Route yang Membutuhkan Login Web
+| Route untuk semua user yang sudah login
 |--------------------------------------------------------------------------
 */
 
 Route::middleware(['auth'])->group(function () {
-
-    /*
-    |--------------------------------------------------------------------------
-    | Dashboard
-    |--------------------------------------------------------------------------
-    */
-
-    Route::get('/dashboard', DashboardIndex::class)
-        ->name('dashboard');
-
-    Route::get('/finance-dashboard', FinanceDashboardIndex::class)
-        ->name('finance-dashboard.index');
-
-    /*
-    |--------------------------------------------------------------------------
-    | Profil
-    |--------------------------------------------------------------------------
-    */
 
     Route::get('/profile', [ProfileController::class, 'edit'])
         ->name('profile.edit');
@@ -101,29 +77,44 @@ Route::middleware(['auth'])->group(function () {
 
     Route::delete('/profile', [ProfileController::class, 'destroy'])
         ->name('profile.destroy');
+});
+
+/*
+|--------------------------------------------------------------------------
+| KHUSUS ADMIN
+|--------------------------------------------------------------------------
+*/
+
+Route::middleware([
+    'auth',
+    'can:admin-only',
+])->group(function () {
 
     /*
-    |--------------------------------------------------------------------------
-    | Absensi Wajah Admin
-    |--------------------------------------------------------------------------
+    | Dashboard
+    */
+
+    Route::get('/dashboard', DashboardIndex::class)
+        ->name('dashboard');
+
+    Route::get('/finance-dashboard', FinanceDashboardIndex::class)
+        ->name('finance-dashboard.index');
+
+    /*
+    | Absensi Wajah
     */
 
     Route::get('/face-attendance', FaceAttendanceIndex::class)
-        ->middleware('can:admin-only')
         ->name('face-attendance.index');
 
     Route::get('/face-enrollment', FaceEnrollmentIndex::class)
-        ->middleware('can:admin-only')
         ->name('face-enrollment.index');
 
     Route::get('/kiosk', KioskIndex::class)
-        ->middleware('can:admin-only')
         ->name('kiosk.index');
 
     /*
-    |--------------------------------------------------------------------------
     | Master Data
-    |--------------------------------------------------------------------------
     */
 
     Route::get('/teachers', TeachersIndex::class)
@@ -148,9 +139,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('transport-settings.index');
 
     /*
-    |--------------------------------------------------------------------------
-    | Absensi Harian dan Mengajar
-    |--------------------------------------------------------------------------
+    | Absensi
     */
 
     Route::get('/daily-attendances', DailyAttendancesIndex::class)
@@ -159,24 +148,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/subject-attendances', SubjectAttendancesIndex::class)
         ->name('subject-attendances.index');
 
-    Route::get(
-        '/picket-subject-attendances',
-        PicketSubjectAttendancesIndex::class
-    )->name('picket-subject-attendances.index');
-
     /*
-    |--------------------------------------------------------------------------
-    | Laporan Piket
-    |--------------------------------------------------------------------------
-    */
-
-    Route::get('/picket-reports/create', PicketReportCreate::class)
-        ->name('picket-reports.create');
-
-    /*
-    |--------------------------------------------------------------------------
     | Honor
-    |--------------------------------------------------------------------------
     */
 
     Route::get('/monthly-honors', MonthlyHonorsIndex::class)
@@ -186,9 +159,58 @@ Route::middleware(['auth'])->group(function () {
         ->name('additional-honors.index');
 
     /*
-    |--------------------------------------------------------------------------
+    | Dhuha Admin
+    */
+
+    Route::get('/dhuha-schedules', DhuhaSchedulesIndex::class)
+        ->name('dhuha-schedules.index');
+
+    Route::get('/dhuha-reports', DhuhaReportsIndex::class)
+        ->name('dhuha-reports.index');
+
+    /*
+    | PDF dan Laporan Admin
+    */
+
+    Route::get(
+        '/honor-reports/institution/pdf/{institution}/{month}/{year}',
+        [InstitutionHonorReportPdfController::class, 'show']
+    )->name('honor-reports.institution.pdf');
+
+    Route::get(
+        '/monthly-honors/{honor}/pdf',
+        [HonorPdfController::class, 'show']
+    )->name('monthly-honors.pdf');
+
+    Route::get(
+        '/subject-attendances/pdf/{date}',
+        [SubjectAttendancePdfController::class, 'show']
+    )->name('subject-attendances.pdf');
+
+    Route::get(
+        '/daily-attendances/pdf/{date}',
+        [DailyAttendancePdfController::class, 'show']
+    )->name('daily-attendances.pdf');
+
+    Route::get(
+        '/honor-payments/{payment}/receipt',
+        [HonorPaymentReceiptController::class, 'show']
+    )->name('honor-payments.receipt');
+});
+
+/*
+|--------------------------------------------------------------------------
+| KHUSUS GURU
+|--------------------------------------------------------------------------
+*/
+
+Route::middleware([
+    'auth',
+    'can:guru-only',
+])->group(function () {
+
+    /*
     | Portal Guru
-    |--------------------------------------------------------------------------
     */
 
     Route::get('/teacher/dashboard', TeacherDashboard::class)
@@ -210,32 +232,22 @@ Route::middleware(['auth'])->group(function () {
         ->name('teacher.dhuha-report');
 
     /*
-    |--------------------------------------------------------------------------
-    | Dhuha
-    |--------------------------------------------------------------------------
+    | Guru Piket
     */
 
-    Route::get('/dhuha-schedules', DhuhaSchedulesIndex::class)
-        ->name('dhuha-schedules.index');
+    Route::get(
+        '/picket-subject-attendances',
+        PicketSubjectAttendancesIndex::class
+    )->name('picket-subject-attendances.index');
 
-    Route::get('/dhuha-reports', DhuhaReportsIndex::class)
-        ->name('dhuha-reports.index');
+    Route::get(
+        '/picket-reports/create',
+        PicketReportCreate::class
+    )->name('picket-reports.create');
 
     /*
-    |--------------------------------------------------------------------------
-    | Laporan dan PDF
-    |--------------------------------------------------------------------------
+    | PDF Guru
     */
-
-    Route::get(
-        '/honor-reports/institution/pdf/{institution}/{month}/{year}',
-        [InstitutionHonorReportPdfController::class, 'show']
-    )->name('honor-reports.institution.pdf');
-
-    Route::get(
-        '/monthly-honors/{honor}/pdf',
-        [HonorPdfController::class, 'show']
-    )->name('monthly-honors.pdf');
 
     Route::get(
         '/teacher/honors/{honor}/pdf',
@@ -246,32 +258,13 @@ Route::middleware(['auth'])->group(function () {
         '/teacher/honors/pdf/{month}/{year}',
         [TeacherHonorPdfController::class, 'download']
     )->name('teacher.honors.pdf');
-
-    Route::get(
-        '/subject-attendances/pdf/{date}',
-        [SubjectAttendancePdfController::class, 'show']
-    )->name('subject-attendances.pdf');
-
-    Route::get(
-        '/daily-attendances/pdf/{date}',
-        [DailyAttendancePdfController::class, 'show']
-    )->name('daily-attendances.pdf');
-
-    Route::get(
-        '/honor-payments/{payment}/receipt',
-        [HonorPaymentReceiptController::class, 'show']
-    )->name('honor-payments.receipt');
-
-    /*
-    |--------------------------------------------------------------------------
-    | Logout
-    |--------------------------------------------------------------------------
-    */
-
-    Route::post(
-        '/logout',
-        [AuthenticatedSessionController::class, 'destroy']
-    )->name('logout');
 });
 
 require __DIR__ . '/auth.php';
+
+Route::post(
+    '/face-enrollment/save',
+    \App\Http\Controllers\FaceEnrollmentSaveController::class
+)
+    ->middleware(['auth', 'can:admin-only'])
+    ->name('face-enrollment.save');

@@ -43,8 +43,8 @@ class TeacherAppController extends Controller
             'teacher_id',
             $teacher->id
         )
-        ->whereMonth('created_at', now()->month)
-        ->whereYear('created_at', now()->year)
+        ->where('month', now()->month)
+        ->where('year', now()->year)
         ->sum('grand_total');
 
         $today = [
@@ -558,51 +558,123 @@ public function announcements(Request $request)
 public function updateProfile(Request $request)
 {
     $user = $request->user();
-    $teacher = $user->teacher;
+    $teacher = $user?->teacher;
 
-    if (! $teacher) {
+    if (! $user || ! $teacher) {
         return response()->json([
             'message' => 'Data guru tidak ditemukan.',
         ], 404);
     }
 
     $data = $request->validate([
-        'name' => ['required', 'string', 'max:255'],
-        'email' => ['required', 'email', 'unique:users,email,' . $user->id],
-        'phone' => ['nullable', 'string', 'max:50'],
-        'password' => ['nullable', 'string', 'min:6'],
-        'photo' => ['nullable', 'image', 'max:2048'],
+        'name' => [
+            'required',
+            'string',
+            'max:255',
+        ],
+        'email' => [
+            'required',
+            'email',
+            'max:255',
+            'unique:users,email,' . $user->id,
+        ],
+        'phone' => [
+            'nullable',
+            'string',
+            'max:50',
+        ],
+        'address' => [
+            'nullable',
+            'string',
+            'max:1000',
+        ],
+        'bio' => [
+            'nullable',
+            'string',
+            'max:3000',
+        ],
+        'password' => [
+            'nullable',
+            'string',
+            'min:6',
+        ],
+        'photo' => [
+            'nullable',
+            'image',
+            'max:2048',
+        ],
     ]);
 
+    $photoPath = $teacher->photo;
+
     if ($request->hasFile('photo')) {
-        $file = $request->file('photo');
-        $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+        $storedPath = $request
+            ->file('photo')
+            ->store('uploads/teachers', 'public');
 
-        $file->storeAs('uploads/teachers', $fileName, 'public');
+        /*
+         * Hapus foto lama dari storage agar file
+         * yang sudah tidak dipakai tidak menumpuk.
+         */
+        if ($teacher->photo) {
+            $oldPhoto = (string) $teacher->photo;
 
-        $teacher->photo = 'storage/uploads/teachers/' . $fileName;
+            if (! preg_match('#^https?://#i', $oldPhoto)) {
+                $oldPath = ltrim($oldPhoto, '/');
+
+                if (str_starts_with($oldPath, 'storage/')) {
+                    $oldPath = substr(
+                        $oldPath,
+                        strlen('storage/')
+                    );
+                }
+
+                if ($oldPath !== '') {
+                    Storage::disk('public')->delete(
+                        $oldPath
+                    );
+                }
+            }
+        }
+
+        $photoPath = 'storage/' . $storedPath;
     }
 
     $teacher->update([
-        'name' => $data['name'],
-        'phone' => $data['phone'] ?? null,
-        'photo' => $teacher->photo,
+        'name' => trim($data['name']),
+        'phone' => isset($data['phone'])
+            ? (trim($data['phone']) ?: null)
+            : null,
+        'address' => isset($data['address'])
+            ? (trim($data['address']) ?: null)
+            : null,
+        'bio' => isset($data['bio'])
+            ? (trim($data['bio']) ?: null)
+            : null,
+        'photo' => $photoPath,
     ]);
 
     $userData = [
-        'name' => $data['name'],
-        'email' => $data['email'],
+        'name' => trim($data['name']),
+        'email' => strtolower(
+            trim($data['email'])
+        ),
     ];
 
     if (! empty($data['password'])) {
-        $userData['password'] = Hash::make($data['password']);
+        $userData['password'] = Hash::make(
+            $data['password']
+        );
     }
 
     $user->update($userData);
 
+    $user->load('teacher');
+
     return response()->json([
         'message' => 'Profil berhasil diperbarui.',
-        'user' => $user->load('teacher'),
+        'role' => $user->role,
+        'user' => $user,
     ]);
 }
 

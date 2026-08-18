@@ -34,5 +34,15 @@ class AppServiceProvider extends ServiceProvider
                 ) === 'admin';
             }
         );
+
+        Gate::define(
+            'guru-only',
+            function (User $user): bool {
+                return strtolower(
+                    trim((string) $user->role)
+                ) === 'guru'
+                    && ! is_null($user->teacher_id);
+            }
+        );
     }
 }

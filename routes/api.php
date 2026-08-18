@@ -4,12 +4,25 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\TeacherAppController;
 use Illuminate\Support\Facades\Route;
 
+/*
+|--------------------------------------------------------------------------
+| Login Android
+|--------------------------------------------------------------------------
+*/
+
 Route::post(
     '/login',
     [AuthController::class, 'login']
 );
 
+/*
+|--------------------------------------------------------------------------
+| Semua pengguna API yang sudah login
+|--------------------------------------------------------------------------
+*/
+
 Route::middleware('auth:sanctum')->group(function () {
+
     Route::get(
         '/me',
         [AuthController::class, 'me']
@@ -22,102 +35,120 @@ Route::middleware('auth:sanctum')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Admin Android
+    | KHUSUS ADMIN ANDROID
     |--------------------------------------------------------------------------
     */
 
-    Route::post(
-        '/admin/web-session',
-        [AuthController::class, 'adminWebSession']
-    );
+    Route::middleware('can:admin-only')->group(function () {
+
+        Route::post(
+            '/admin/web-session',
+            [AuthController::class, 'adminWebSession']
+        );
+    });
 
     /*
     |--------------------------------------------------------------------------
-    | Portal Guru Android
+    | KHUSUS GURU ANDROID
     |--------------------------------------------------------------------------
     */
 
-    Route::get(
-        '/teacher/dashboard',
-        [TeacherAppController::class, 'dashboard']
-    );
+    Route::middleware('can:guru-only')->group(function () {
 
-    Route::get(
-        '/teacher/attendances',
-        [TeacherAppController::class, 'attendances']
-    );
+        Route::get(
+            '/teacher/dashboard',
+            [TeacherAppController::class, 'dashboard']
+        );
 
-    Route::get(
-        '/teacher/schedules',
-        [TeacherAppController::class, 'schedules']
-    );
+        Route::get(
+            '/teacher/attendances',
+            [TeacherAppController::class, 'attendances']
+        );
 
-    Route::get(
-        '/teacher/honors',
-        [TeacherAppController::class, 'honors']
-    );
+        Route::get(
+            '/teacher/schedules',
+            [TeacherAppController::class, 'schedules']
+        );
 
-    Route::get(
-        '/teacher/honors/{honor}/slip',
-        [TeacherAppController::class, 'honorSlip']
-    );
+        Route::get(
+            '/teacher/honors',
+            [TeacherAppController::class, 'honors']
+        );
 
-    Route::get(
-        '/teacher/dhuha',
-        [TeacherAppController::class, 'dhuha']
-    );
+        Route::get(
+            '/teacher/honors/{honor}/slip',
+            [TeacherAppController::class, 'honorSlip']
+        );
 
-    Route::post(
-        '/teacher/dhuha',
-        [TeacherAppController::class, 'saveDhuha']
-    );
+        Route::get(
+            '/teacher/dhuha',
+            [TeacherAppController::class, 'dhuha']
+        );
 
-    Route::get(
-        '/teacher/picket-subject-attendances',
-        [
-            TeacherAppController::class,
-            'picketSubjectAttendances',
-        ]
-    );
+        Route::post(
+            '/teacher/dhuha',
+            [TeacherAppController::class, 'saveDhuha']
+        );
 
-    Route::post(
-        '/teacher/picket-subject-attendances',
-        [
-            TeacherAppController::class,
-            'markPicketSubjectAttendance',
-        ]
-    );
+        /*
+        | Guru Piket
+        */
 
-    Route::get(
-        '/teacher/picket-report',
-        [TeacherAppController::class, 'picketReport']
-    );
+        Route::get(
+            '/teacher/picket-subject-attendances',
+            [
+                TeacherAppController::class,
+                'picketSubjectAttendances',
+            ]
+        );
 
-    Route::post(
-        '/teacher/picket-report',
-        [TeacherAppController::class, 'savePicketReport']
-    );
+        Route::post(
+            '/teacher/picket-subject-attendances',
+            [
+                TeacherAppController::class,
+                'markPicketSubjectAttendance',
+            ]
+        );
 
-    Route::get(
-        '/teacher/announcements',
-        [TeacherAppController::class, 'announcements']
-    );
+        Route::get(
+            '/teacher/picket-report',
+            [TeacherAppController::class, 'picketReport']
+        );
 
-    Route::get(
-        '/teacher/notifications',
-        [TeacherAppController::class, 'notifications']
-    );
+        Route::post(
+            '/teacher/picket-report',
+            [TeacherAppController::class, 'savePicketReport']
+        );
 
-    Route::post(
-        '/teacher/notifications/{notification}/read',
-        [
-            TeacherAppController::class,
-            'markNotificationAsRead',
-        ]
-    );
+        /*
+        | Pengumuman dan Notifikasi
+        */
 
-    Route::post(
-        '/teacher/profile',
-        [TeacherAppController::class, 'updateProfile']
-    );
+        Route::get(
+            '/teacher/announcements',
+            [TeacherAppController::class, 'announcements']
+        );
+
+        Route::get(
+            '/teacher/notifications',
+            [TeacherAppController::class, 'notifications']
+        );
+
+        Route::post(
+            '/teacher/notifications/{notification}/read',
+            [
+                TeacherAppController::class,
+                'markNotificationAsRead',
+            ]
+        );
+
+        /*
+        | Profil Guru
+        */
+
+        Route::post(
+            '/teacher/profile',
+            [TeacherAppController::class, 'updateProfile']
+        );
+    });
 });

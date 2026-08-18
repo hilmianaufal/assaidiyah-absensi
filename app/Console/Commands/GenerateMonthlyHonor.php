@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Models\AdditionalHonor;
 use App\Models\DailyAttendance;
-use App\Models\Institution;
 use App\Models\MonthlyHonor;
 use App\Models\SubjectAttendance;
 use App\Models\TeacherHonorPackage;
@@ -23,63 +22,128 @@ class GenerateMonthlyHonor extends Command
         $month = (int) ($this->argument('month') ?: $targetDate->month);
         $year = (int) ($this->argument('year') ?: $targetDate->year);
 
-        $packages = TeacherHonorPackage::with(['teacher', 'institution'])
+        if ($month < 1 || $month > 12) {
+            $this->error('Bulan harus antara 1 sampai 12.');
+
+            return Command::FAILURE;
+        }
+
+        if ($year < 2020 || $year > 2100) {
+            $this->error('Tahun tidak valid.');
+
+            return Command::FAILURE;
+        }
+
+        $packages = TeacherHonorPackage::with([
+            'teacher',
+            'institution',
+        ])
             ->where('is_active', true)
+            ->orderBy('teacher_id')
+            ->orderBy('institution_id')
             ->get();
+
+        /*
+         * Transport adalah hak guru per hari, bukan per lembaga.
+         * Karena satu guru dapat berada di beberapa lembaga,
+         * transport hanya dimasukkan satu kali pada rekap guru.
+         */
+        $transportAssigned = [];
+
+        $processed = 0;
+        $skipped = 0;
 
         foreach ($packages as $package) {
             $teacher = $package->teacher;
             $institution = $package->institution;
 
-            if (! $teacher || ! $teacher->is_active || ! $institution) {
+            if (
+                ! $teacher
+                || ! $teacher->is_active
+                || ! $institution
+            ) {
+                $skipped++;
+
                 continue;
             }
 
-            $subjectQuery = SubjectAttendance::where('teacher_id', $teacher->id)
+            /*
+             * Total JP yang tercatat pada lembaga tersebut.
+             */
+            $subjectQuery = SubjectAttendance::query()
+                ->where('teacher_id', $teacher->id)
                 ->where('institution_id', $institution->id)
                 ->whereMonth('teaching_date', $month)
                 ->whereYear('teaching_date', $year);
 
-            $totalTeachingHours = (int) $subjectQuery->sum('hours_count');
+            $totalTeachingHours = (int) (
+                clone $subjectQuery
+            )->sum('hours_count');
 
+            /*
+             * Honor dasar mengikuti paket honor aktif.
+             */
             $baseTeachingHonor = (int) $package->monthly_honor;
 
-            $totalAdditionalHonor = (int) AdditionalHonor::where('teacher_id', $teacher->id)
+            /*
+             * Tambahan honor dihitung per guru dan per lembaga.
+             */
+            $totalAdditionalHonor = (int) AdditionalHonor::query()
+                ->where('teacher_id', $teacher->id)
                 ->where('institution_id', $institution->id)
                 ->where('month', $month)
                 ->where('year', $year)
                 ->sum('amount');
 
-            $totalAbsentHours = (int) SubjectAttendance::where('teacher_id', $teacher->id)
+            /*
+             * Potongan hanya dihitung dari JP berstatus absent.
+             */
+            $totalAbsentHours = (int) SubjectAttendance::query()
+                ->where('teacher_id', $teacher->id)
                 ->where('institution_id', $institution->id)
                 ->whereMonth('teaching_date', $month)
                 ->whereYear('teaching_date', $year)
                 ->where('attendance_status', 'absent')
                 ->sum('hours_count');
 
-            $totalDeduction = (int) ($totalAbsentHours * $package->deduction_per_hour);
+            $totalDeduction = (int) (
+                $totalAbsentHours
+                * $package->deduction_per_hour
+            );
 
-            $alreadyHasTransport = MonthlyHonor::where('teacher_id', $teacher->id)
-                ->where('month', $month)
-                ->where('year', $year)
-                ->where('total_transport', '>', 0)
-                ->exists();
-
+            /*
+             * Transport hanya diberikan satu kali untuk setiap guru,
+             * walaupun guru tersebut mempunyai honor di beberapa lembaga.
+             *
+             * Array ini direset setiap command dijalankan sehingga
+             * generate ulang menghasilkan nilai yang konsisten.
+             */
             $totalTransport = 0;
 
-            if (! $alreadyHasTransport) {
-                $totalTransport = (int) DailyAttendance::where('teacher_id', $teacher->id)
+            if (! isset($transportAssigned[$teacher->id])) {
+                $totalTransport = (int) DailyAttendance::query()
+                    ->where('teacher_id', $teacher->id)
                     ->whereMonth('attendance_date', $month)
                     ->whereYear('attendance_date', $year)
                     ->sum('transport_amount');
+
+                $transportAssigned[$teacher->id] = true;
             }
 
-            $grandTotal = $baseTeachingHonor
+            $grandTotal = max(
+                $baseTeachingHonor
                 + $totalTransport
                 + $totalAdditionalHonor
-                - $totalDeduction;
+                - $totalDeduction,
+                0
+            );
 
-            MonthlyHonor::updateOrCreate(
+            /*
+             * Jangan set payment_status di sini.
+             * Status pembayaran harus mengikuti transaksi pembayaran
+             * yang benar-benar tersimpan di honor_payments.
+             */
+            $honor = MonthlyHonor::updateOrCreate(
                 [
                     'teacher_id' => $teacher->id,
                     'institution_id' => $institution->id,
@@ -93,13 +157,42 @@ class GenerateMonthlyHonor extends Command
                     'total_additional_honor' => $totalAdditionalHonor,
                     'total_absent_hours' => $totalAbsentHours,
                     'total_deduction' => $totalDeduction,
-                    'grand_total' => max($grandTotal, 0),
-                    'payment_status' => 'unpaid',
+                    'grand_total' => $grandTotal,
                 ]
             );
+
+            /*
+             * Sinkronkan status dengan pembayaran yang sudah ada.
+             * Jadi generate ulang tidak menghilangkan status lunas.
+             */
+            $totalPaid = (int) $honor
+                ->payments()
+                ->sum('amount');
+
+            if ($totalPaid <= 0) {
+                $honor->update([
+                    'payment_status' => 'unpaid',
+                    'paid_at' => null,
+                ]);
+            } elseif ($totalPaid >= $grandTotal) {
+                $honor->update([
+                    'payment_status' => 'paid',
+                    'paid_at' => $honor->paid_at ?: now(),
+                ]);
+            } else {
+                $honor->update([
+                    'payment_status' => 'partial',
+                    'paid_at' => null,
+                ]);
+            }
+
+            $processed++;
         }
 
-        $this->info("Rekap honor bulan {$month}-{$year} berhasil dibuat dari paket honor aktif.");
+        $this->info(
+            "Rekap honor {$month}-{$year} selesai. "
+            . "Diproses: {$processed}, dilewati: {$skipped}."
+        );
 
         return Command::SUCCESS;
     }

@@ -3,6 +3,9 @@
 namespace App\Livewire\TeacherPortal;
 
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -10,72 +13,155 @@ class Profile extends Component
 {
     use WithFileUploads;
 
-    public $name;
-    public $email;
-    public $phone;
-    public $address;
-    public $bio;
-    public $photo;
+    public string $name = '';
+    public string $email = '';
+    public string $phone = '';
+    public string $address = '';
+    public string $bio = '';
 
-    public $newPassword;
-    public $newPasswordConfirmation;
+    public $photo = null;
 
-    public function mount()
-    {
-        $teacher = auth()->user()->teacher;
+    public string $newPassword = '';
+    public string $newPasswordConfirmation = '';
 
-        $this->name = $teacher->name;
-        $this->email = auth()->user()->email;
-        $this->phone = $teacher->phone;
-        $this->address = $teacher->address;
-        $this->bio = $teacher->bio;
-    }
-
-    public function save()
+    public function mount(): void
     {
         $user = auth()->user();
-        $teacher = $user->teacher;
+        $teacher = $user?->teacher;
+
+        if (! $user || ! $teacher) {
+            abort(
+                403,
+                'Akun ini belum terhubung dengan data guru.'
+            );
+        }
+
+        $this->name = (string) $teacher->name;
+        $this->email = (string) $user->email;
+        $this->phone = (string) ($teacher->phone ?? '');
+        $this->address = (string) ($teacher->address ?? '');
+        $this->bio = (string) ($teacher->bio ?? '');
+    }
+
+    public function save(): void
+    {
+        $user = auth()->user();
+        $teacher = $user?->teacher;
+
+        if (! $user || ! $teacher) {
+            abort(
+                403,
+                'Akun ini belum terhubung dengan data guru.'
+            );
+        }
 
         $this->validate([
-            'name' => 'required',
-            'email' => 'required|email',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+            ],
+
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')
+                    ->ignore($user->id),
+            ],
+
+            'phone' => [
+                'nullable',
+                'string',
+                'max:50',
+            ],
+
+            'address' => [
+                'nullable',
+                'string',
+                'max:1000',
+            ],
+
+            'bio' => [
+                'nullable',
+                'string',
+                'max:3000',
+            ],
+
+            'photo' => [
+                'nullable',
+                'image',
+                'max:2048',
+            ],
+
+            'newPassword' => [
+                'nullable',
+                'string',
+                'min:6',
+            ],
+
+            'newPasswordConfirmation' => [
+                'nullable',
+                'same:newPassword',
+            ],
         ]);
 
+        $photoPath = $teacher->photo;
+
         if ($this->photo) {
-
-            $fileName = time() . '.'.$this->photo->extension();
-
-            $this->photo->storeAs(
+            $storedPath = $this->photo->store(
                 'uploads/teachers',
-                $fileName,
                 'public'
             );
 
-            $teacher->photo = 'storage/uploads/teachers/'.$fileName;
+            /*
+             * Hapus foto lama hanya jika foto tersebut
+             * memang berasal dari storage lokal.
+             */
+            if (
+                $teacher->photo
+                && Str::startsWith(
+                    $teacher->photo,
+                    'storage/'
+                )
+            ) {
+                Storage::disk('public')->delete(
+                    Str::after(
+                        $teacher->photo,
+                        'storage/'
+                    )
+                );
+            }
+
+            $photoPath = 'storage/' . $storedPath;
         }
 
         $teacher->update([
-            'name' => $this->name,
-            'phone' => $this->phone,
-            'address' => $this->address,
-            'bio' => $this->bio,
-            'photo' => $teacher->photo,
+            'name' => trim($this->name),
+            'phone' => trim($this->phone) ?: null,
+            'address' => trim($this->address) ?: null,
+            'bio' => trim($this->bio) ?: null,
+            'photo' => $photoPath,
         ]);
 
-        $user->update([
-            'email' => $this->email,
-        ]);
+        $userData = [
+            'name' => trim($this->name),
+            'email' => strtolower(
+                trim($this->email)
+            ),
+        ];
 
-        if ($this->newPassword) {
-
-            $this->validate([
-                'newPassword' => 'min:6|same:newPasswordConfirmation'
-            ]);
-
-            $user->update([
-                'password' => Hash::make($this->newPassword),
-            ]);
+        if ($this->newPassword !== '') {
+            $userData['password'] = Hash::make(
+                $this->newPassword
+            );
         }
+
+        $user->update($userData);
+
+        $this->photo = null;
+        $this->newPassword = '';
+        $this->newPasswordConfirmation = '';
 
         session()->flash(
             'success',
@@ -85,7 +171,11 @@ class Profile extends Component
 
     public function render()
     {
-        return view('livewire.teacher-portal.profile')
-            ->layout('layouts.app');
+        return view(
+            'livewire.teacher-portal.profile',
+            [
+                'teacher' => auth()->user()->teacher,
+            ]
+        )->layout('layouts.app');
     }
 }

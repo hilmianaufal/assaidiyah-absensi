@@ -58,7 +58,7 @@
                     Nama guru akan muncul langsung di dalam kamera.
                 </p>
 
-                <form wire:submit="saveFace" class="space-y-4">
+                <form onsubmit="event.preventDefault(); saveFaceHttp();" class="space-y-4">
                     <select wire:model="teacher_id" id="teacherSelect"
                         class="w-full rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500">
                         <option value="">Pilih Guru</option>
@@ -107,6 +107,7 @@
         let enrollStream = null;
         let enrollModelsLoaded = false;
         let captureCooldown = false;
+        let capturedDescriptor = null;
 
         function speakAI(text) {
             if (!window.speechSynthesis) return;
@@ -270,7 +271,8 @@
                 }
 
                 const descriptor = Array.from(detection.descriptor);
-                @this.set('descriptor', JSON.stringify(descriptor));
+
+                capturedDescriptor = descriptor;
 
                 const teacherName = teacherSelect.options[
                     teacherSelect.selectedIndex
@@ -310,7 +312,303 @@
             }
         }
 
-        window.addEventListener('beforeunload', stopEnrollCamera);
+
+        async function saveCapturedFace() {
+            const teacherSelect =
+                document.getElementById('teacherSelect');
+
+            if (!teacherSelect || !teacherSelect.value) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih guru dulu',
+                    text: 'Silakan pilih guru terlebih dahulu.'
+                });
+
+                return;
+            }
+
+            if (
+                !Array.isArray(capturedDescriptor) ||
+                capturedDescriptor.length !== 128
+            ) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Data wajah belum diambil',
+                    text: 'Klik Ambil Data Wajah terlebih dahulu.'
+                });
+
+                return;
+            }
+
+            const teacherId = Number(
+                teacherSelect.value
+            );
+
+            const statusElement =
+                document.getElementById('faceStatus');
+
+            statusElement.innerText =
+                'Menyimpan data wajah...';
+
+            try {
+                const result = await @this.call(
+                    'saveFaceDescriptor',
+                    teacherId,
+                    capturedDescriptor
+                );
+
+                if (
+                    !result ||
+                    result.status !== 'success'
+                ) {
+                    throw new Error(
+                        result?.message ||
+                        'Gagal menyimpan data wajah.'
+                    );
+                }
+
+                /*
+                 * Setelah Livewire render, ambil ulang
+                 * element select dari DOM.
+                 */
+                const freshSelect =
+                    document.getElementById(
+                        'teacherSelect'
+                    );
+
+                if (freshSelect) {
+                    freshSelect.value =
+                        String(result.teacher_id);
+
+                    const option = Array.from(
+                        freshSelect.options
+                    ).find(
+                        item =>
+                            item.value ===
+                            String(result.teacher_id)
+                    );
+
+                    if (option) {
+                        option.textContent =
+                            result.name +
+                            ' (Sudah Terdaftar)';
+                    }
+                }
+
+                const freshStatus =
+                    document.getElementById(
+                        'faceStatus'
+                    );
+
+                if (freshStatus) {
+                    freshStatus.innerText =
+                        '✓ Wajah sudah terdaftar';
+
+                    freshStatus.classList.remove(
+                        'text-blue-700'
+                    );
+
+                    freshStatus.classList.add(
+                        'text-emerald-600'
+                    );
+                }
+
+                const overlay =
+                    document.getElementById(
+                        'teacherOverlay'
+                    );
+
+                if (overlay) {
+                    overlay.innerText =
+                        'Terdaftar: ' + result.name;
+                }
+
+                capturedDescriptor = null;
+
+                speakAI(
+                    'Data wajah ' +
+                    result.name +
+                    ' berhasil disimpan.'
+                );
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Registrasi Berhasil',
+                    text:
+                        result.name +
+                        ' sudah terdaftar.',
+                    timer: 1800,
+                    showConfirmButton: false
+                });
+
+            } catch (error) {
+                console.error(
+                    'SAVE FACE ERROR:',
+                    error
+                );
+
+                const freshStatus =
+                    document.getElementById(
+                        'faceStatus'
+                    );
+
+                if (freshStatus) {
+                    freshStatus.innerText =
+                        'Gagal menyimpan data wajah';
+                }
+
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal menyimpan',
+                    text:
+                        error.message ||
+                        'Terjadi kesalahan.'
+                });
+            }
+        }
+
+        
+        async function saveFaceHttp() {
+            const teacherSelect =
+                document.getElementById('teacherSelect');
+
+            if (
+                !teacherSelect ||
+                !teacherSelect.value
+            ) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Guru belum dipilih',
+                    text: 'Silakan pilih guru terlebih dahulu.'
+                });
+
+                return;
+            }
+
+            if (
+                !Array.isArray(capturedDescriptor) ||
+                capturedDescriptor.length !== 128
+            ) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Data wajah belum tersedia',
+                    text: 'Klik Ambil Data Wajah terlebih dahulu.'
+                });
+
+                return;
+            }
+
+            const status =
+                document.getElementById('faceStatus');
+
+            if (status) {
+                status.innerText =
+                    'Menyimpan data wajah...';
+            }
+
+            try {
+                const response = await fetch(
+                    '{{ route("face-enrollment.save") }}',
+                    {
+                        method: 'POST',
+
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN':
+                                '{{ csrf_token() }}'
+                        },
+
+                        body: JSON.stringify({
+                            teacher_id:
+                                Number(
+                                    teacherSelect.value
+                                ),
+
+                            descriptor:
+                                capturedDescriptor
+                        })
+                    }
+                );
+
+                const result =
+                    await response.json();
+
+                if (!response.ok) {
+                    console.error(
+                        'FACE SAVE RESPONSE:',
+                        result
+                    );
+
+                    throw new Error(
+                        result.message ||
+                        'Gagal menyimpan data wajah.'
+                    );
+                }
+
+                if (
+                    result.status !== 'success' ||
+                    result.descriptor_count !== 128
+                ) {
+                    throw new Error(
+                        result.message ||
+                        'Descriptor tidak valid.'
+                    );
+                }
+
+                if (status) {
+                    status.innerText =
+                        '✓ Wajah sudah terdaftar';
+
+                    status.classList.remove(
+                        'text-blue-700'
+                    );
+
+                    status.classList.add(
+                        'text-emerald-600'
+                    );
+                }
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Registrasi Berhasil',
+                    text:
+                        result.teacher_name +
+                        ' berhasil diregistrasi.',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+
+                /*
+                 * Reload supaya dropdown membaca langsung
+                 * kondisi face_descriptor dari database.
+                 */
+                setTimeout(() => {
+                    window.location.reload();
+                }, 700);
+
+            } catch (error) {
+                console.error(
+                    'FACE SAVE ERROR:',
+                    error
+                );
+
+                if (status) {
+                    status.innerText =
+                        'Gagal menyimpan wajah';
+                }
+
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal Menyimpan',
+                    text:
+                        error.message ||
+                        'Terjadi kesalahan.'
+                });
+            }
+        }
+
+window.addEventListener('beforeunload', stopEnrollCamera);
         document.addEventListener('livewire:navigating', stopEnrollCamera);
     </script>
 </div>
